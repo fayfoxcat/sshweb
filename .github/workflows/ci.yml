@@ -30,13 +30,15 @@ jobs:
       - name: Build frontend (produces build/ for rust-embed)
         run: npm run build
 
-      - name: Install Rust nightly (rustfmt per AGENTS.md)
-        uses: dtolnay/rust-toolchain@nightly
+      # Pin the nightly date so rustfmt reflow rules match the source (fresh
+      # `nightly` drifts: a newer rustfmt re-wraps comments differently).
+      - name: Install pinned nightly rustfmt
+        uses: dtolnay/rust-toolchain@nightly-2026-08-18
         with:
           components: rustfmt
 
-      - name: Format check (nightly rustfmt)
-        run: cargo +nightly fmt --check
+      - name: Format check (pinned nightly rustfmt)
+        run: cargo fmt --check
 
       - name: Cargo check + test
         run: cargo test --workspace
@@ -78,15 +80,10 @@ jobs:
       - name: Build static musl binary
         run: cargo build --release --target x86_64-unknown-linux-musl --bin sshweb
 
-      # Dynamic glibc build — for machines with glibc >= runner's (Ubuntu).
-      - name: Build glibc binary
-        run: cargo build --release --bin sshweb
-
       - name: Stage release artifacts
         run: |
           mkdir -p dist
           cp target/x86_64-unknown-linux-musl/release/sshweb dist/sshweb-${GITHUB_REF_NAME}-x86_64-unknown-linux-musl
-          cp target/release/sshweb dist/sshweb-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu
           chmod +x dist/sshweb-*
           ls -l dist/
 
