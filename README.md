@@ -10,7 +10,7 @@
 - 前后端打进**单个可执行文件**(`rust-embed` 内嵌前端),运行时无额外依赖
 
 <p align="center">
-  <img src="static/sshweb-demo.webp" alt="sshweb 界面演示" width="90%" />
+  <img src="static/演示.gif" alt="sshweb 界面演示" width="90%" />
 </p>
 
 > Linux/WSL 构建部署。Windows 原生编译不支持(`tokio::signal::unix` / PTY 驱动)。
