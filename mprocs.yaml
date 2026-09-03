@@ -1,0 +1,10 @@
+# prettier-ignore
+procs:
+  server:
+    shell: >-
+      cargo run --bin sshweb --
+      --listen 127.0.0.1
+      --port 2223
+  web:
+    shell: npm run dev
+    stop: SIGKILL  # TODO: Why is this necessary?

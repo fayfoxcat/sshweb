@@ -1,0 +1,15 @@
+# IDEA
+/.vscode
+/.idea
+# 前端依赖与构建产物
+node_modules/
+.svelte-kit/
+build/
+target/
+*.enc
+*.log
+.env
+.env.*
+# OS
+.DS_Store
+Thumbs.db

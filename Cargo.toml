@@ -1,0 +1,30 @@
+[workspace]
+members = ["crates/sshweb-core", "crates/sshweb-server"]
+resolver = "2"
+
+[workspace.package]
+version = "0.4.1"
+authors = ["Eric Zhang <ekzhang1@gmail.com>"]
+license = "MIT"
+description = "A browser-based web SSH terminal and remote file manager."
+repository = "https://github.com/ekzhang/sshx"
+documentation = "https://github.com/ekzhang/sshx"
+keywords = ["ssh", "web", "terminal", "sftp"]
+
+[workspace.dependencies]
+anyhow = "1.0.62"
+aes-gcm = "0.10.3"
+argon2 = "0.5.3"
+clap = { version = "4.5.17", features = ["derive", "env"] }
+openssh-sftp-client = "0.15"
+rand = "0.8.5"
+serde = { version = "1.0.188", features = ["derive", "rc"] }
+serde_json = "1.0.106"
+sshweb-core = { version = "0.4.1", path = "crates/sshweb-core" }
+tokio = { version = "1.40.0", features = ["full"] }
+tokio-stream = { version = "0.1.14", features = ["sync"] }
+tracing = "0.1.37"
+tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
+
+[profile.release]
+strip = true
