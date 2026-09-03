@@ -33,8 +33,9 @@ jobs:
       # Pin the nightly date so rustfmt reflow rules match the source (fresh
       # `nightly` drifts: a newer rustfmt re-wraps comments differently).
       - name: Install pinned nightly rustfmt
-        uses: dtolnay/rust-toolchain@nightly-2026-08-18
+        uses: dtolnay/rust-toolchain@v1
         with:
+          toolchain: nightly-2026-08-18
           components: rustfmt
 
       - name: Format check (pinned nightly rustfmt)
@@ -69,8 +70,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y musl-tools
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@v1
         with:
+          toolchain: stable
           targets: x86_64-unknown-linux-musl
 
       - name: Cache cargo registry
