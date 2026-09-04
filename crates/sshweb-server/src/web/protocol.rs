@@ -199,7 +199,8 @@ pub struct ServerConfig {
     #[serde(default)]
     pub startup: String,
     /// 启动目录(初始目录):新建终端在此目录启动、首次打开 SFTP 文件也在此浏览。
-    /// 空串或 `~` = 该 SSH 用户的主目录;`~/…` 相对主目录展开。
+    /// 留空或 `~` = 该 SSH 用户的主目录;支持绝对路径或相对路径(相对路径以该
+    /// 用户主目录为基准,如 `project` 即主目录下的 `project`)。
     #[serde(default)]
     pub startup_dir: String,
     /// Authentication method: `"password"` (default) or `"key"`. When `"key"`

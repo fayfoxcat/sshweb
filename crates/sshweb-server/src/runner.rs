@@ -111,10 +111,11 @@ pub async fn ssh_task(
     channel
         .request_pty(true, "xterm-256color", 80, 24, 0, 0, &[])
         .await?;
-    // Start the shell in the requested directory, if any. `~/…` keeps its
-    // leading `~` unquoted so the remote login shell expands it to $HOME
-    // (a quoted `'~'` would not); a bare `~`/`~/`/empty means home — just
-    // exec, since the login shell already starts there.
+    // Start the shell in the requested directory, if any. Absolute paths are
+    // quoted verbatim; `~/…` keeps its leading `~` unquoted and bare relative
+    // paths are anchored the same way, so the remote login shell expands the
+    // `~` to $HOME (a quoted `'~'` would not). Empty / `~` / `~/` mean home —
+    // just exec, since the login shell already starts there.
     match cwd.as_deref() {
         Some(cwd) if cwd != "~" && cwd != "~/" && !cwd.is_empty() => {
             let cmd = if let Some(rest) = cwd.strip_prefix("~/") {
@@ -122,9 +123,15 @@ pub async fn ssh_task(
                     "cd ~/'{}' && exec ${{SHELL:-/bin/sh}}",
                     crate::utils::shell_quote(rest)
                 )
-            } else {
+            } else if cwd.starts_with('/') {
                 format!(
                     "cd '{}' && exec ${{SHELL:-/bin/sh}}",
+                    crate::utils::shell_quote(cwd)
+                )
+            } else {
+                // Bare relative path (e.g. `project`): home-anchored like `~/…`.
+                format!(
+                    "cd ~/'{}' && exec ${{SHELL:-/bin/sh}}",
                     crate::utils::shell_quote(cwd)
                 )
             };

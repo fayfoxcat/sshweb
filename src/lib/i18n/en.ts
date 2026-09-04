@@ -291,7 +291,7 @@ const en = {
   "servers.startupDirLabel": "Startup directory",
   "servers.startupDirPlaceholder": "Blank = home, e.g. /data/app",
   "servers.startupDirDesc":
-    "New terminals start here and the first file (SFTP) open browses here. Leave blank for the SSH user's home; absolute paths or ~/… (relative to home) are supported.",
+    "Startup directory. Leave blank for the SSH user's home; absolute/relative paths are supported.",
 
   "editor.close": "Close",
   "editor.minimize": "Minimize",

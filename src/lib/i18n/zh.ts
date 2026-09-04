@@ -291,7 +291,7 @@ const zh = {
   "servers.startupDirLabel": "启动目录",
   "servers.startupDirPlaceholder": "留空 = 用户主目录,如 /data/app",
   "servers.startupDirDesc":
-    "新建终端在此目录启动、首次打开文件(SFTP)也在此浏览。留空为该 SSH 用户的主目录;支持绝对路径或 ~/…(相对主目录)。",
+    "启动目录，留空为该 SSH 用户的主目录;支持绝对/相对路径",
 
   // Editor
   "editor.close": "关闭",

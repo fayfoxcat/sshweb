@@ -35,23 +35,29 @@ impl WriteOp {
 }
 
 /// Resolve a configured/prompt working directory to an absolute SFTP path:
-/// empty or `~` → the probed login home; `~/…` → home + suffix. Absolute
-/// paths pass through unchanged (they are used verbatim as the browse start).
+/// empty or `~` → the probed login home; `~/…` and bare relative paths are
+/// anchored at that home; absolute paths pass through unchanged (they are
+/// used verbatim as the browse start).
 fn resolve_start_dir(dir: &str, home: &str) -> String {
     let dir = dir.trim();
-    if dir.is_empty() || dir == "~" || dir == "~/" {
+    if dir.is_empty() || dir == "~" {
         return home.to_string();
     }
-    if let Some(rest) = dir.strip_prefix("~/") {
-        return if rest.is_empty() {
-            home.to_string()
-        } else if home.is_empty() {
-            dir.to_string()
-        } else {
-            format!("{}/{}", home.trim_end_matches('/'), rest)
-        };
+    let rest = if let Some(rest) = dir.strip_prefix("~/") {
+        rest
+    } else if dir.starts_with('/') {
+        return dir.to_string();
+    } else {
+        // Bare relative path (e.g. `project`): anchored at the user's home.
+        dir
+    };
+    if rest.is_empty() {
+        return home.to_string();
     }
-    dir.to_string()
+    if home.is_empty() {
+        return dir.to_string();
+    }
+    format!("{}/{}", home.trim_end_matches('/'), rest)
 }
 
 impl Session {

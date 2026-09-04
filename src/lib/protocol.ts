@@ -96,7 +96,8 @@ export type WsServerConfig = {
   /** Commands typed into the shell once the terminal starts (one per line). */
   startup?: string;
   /** 启动目录(初始目录):新建终端在此启动、首次打开 SFTP 也在此浏览。
-   *  空串或 `~` = SSH 用户主目录;`~/…` 相对主目录展开。 */
+   *  留空或 `~` = SSH 用户主目录;支持绝对路径或相对路径(相对路径以该用户
+   *  主目录为基准,如 `project` 即主目录下的 `project`)。 */
   startupDir?: string;
   /** Authentication method: "password" (default) or "key". */
   authMethod?: string;
