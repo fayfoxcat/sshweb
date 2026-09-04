@@ -29,6 +29,7 @@
   import { createSessionRuntime } from "./session/runtime";
   import { createStatsPolling } from "./session/stats";
   import { storageGet, storageSet } from "./storage";
+  import { uuid } from "./uuid";
   import themes from "./ui/themes";
   import { createReorderDnd, droppable } from "./ui/dnd";
   import { collectDropFiles, startUpload, type DropPayload } from "./upload";
@@ -334,11 +335,9 @@
     // session after a refresh, so terminals/processes are preserved.
     let sessionKey = sessionStorage.getItem(SESSION_STORAGE_KEY);
     if (!sessionKey) {
-      // `crypto.randomUUID` needs a secure context; fall back for plain http.
-      sessionKey =
-        typeof crypto.randomUUID === "function"
-          ? crypto.randomUUID()
-          : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      // `uuid()` falls back for plain-http (non-secure) contexts where
+      // `crypto.randomUUID` is unavailable.
+      sessionKey = uuid();
       sessionStorage.setItem(SESSION_STORAGE_KEY, sessionKey);
     }
     srocket = new Srocket<WsServer, WsClient>(`/api/s/${sessionKey}`, {

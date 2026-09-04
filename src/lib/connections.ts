@@ -4,6 +4,7 @@ import { request } from "./api";
 import { DEFAULT_SSH_PORT, DEFAULT_SOCKS_PORT } from "./constants";
 import { tr } from "./i18n";
 import { clearLegacyServers, readLegacyServers } from "./legacy";
+import { uuid } from "./uuid";
 import type {
   WsJumpHost,
   WsProxyConfig,
@@ -226,7 +227,7 @@ export async function loadServers(): Promise<void> {
 /** Add and persist a server configuration. */
 export async function addServer(input: ServerInput): Promise<ServerConfig> {
   const current = get(serverStore);
-  const config = serverConfig({ id: crypto.randomUUID(), ...input });
+  const config = serverConfig({ id: uuid(), ...input });
   await persist({
     ...current,
     servers: [...current.servers, config],
@@ -283,7 +284,7 @@ export async function duplicateServer(
   if (!source) return null;
   const copy: ServerConfig = {
     ...source,
-    id: crypto.randomUUID(),
+    id: uuid(),
     name: `${source.name}${tr("common.copySuffix")}`,
     hosts: source.hosts.map((host) => ({ ...host })),
     proxy: source.proxy ? { ...source.proxy } : null,

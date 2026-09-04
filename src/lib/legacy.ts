@@ -13,6 +13,7 @@ import { browser } from "$app/environment";
 
 import { STORAGE_KEY_SERVERS } from "./constants";
 import type { WsServerConfig } from "./protocol";
+import { uuid } from "./uuid";
 
 const SECRET = "sshx-local-secret-v1";
 const SALT = "sshx-servers-salt";
@@ -87,7 +88,7 @@ export async function readLegacyServers(): Promise<LegacyServer[] | null> {
       // Defaults for `name`/`port` are applied later by `serverConfig` in
       // connections.ts — don't re-normalize here.
       legacy.servers.map(async (server) => ({
-        id: server.id || crypto.randomUUID(),
+        id: server.id || uuid(),
         name: server.name,
         host: server.host,
         port: server.port,
