@@ -194,8 +194,6 @@ const en = {
   "servers.addBtn": "Add",
   "servers.phName": "my server",
   "servers.editTitle": "Edit server",
-  "servers.formDesc":
-    "Configure a remote SSH server; terminals can connect to it. Configs are saved encrypted on the server.",
   "servers.labelName": "Name",
   "servers.labelHost": "Host",
   "servers.labelPort": "Port",

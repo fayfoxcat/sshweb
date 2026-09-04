@@ -196,8 +196,6 @@ const zh = {
   "servers.addBtn": "添加",
   "servers.phName": "我的服务器",
   "servers.editTitle": "编辑服务器",
-  "servers.formDesc":
-    "配置远程 SSH 服务器,新建终端时可选择连接。配置会在服务端加密保存。",
   "servers.labelName": "名称",
   "servers.labelHost": "主机",
   "servers.labelPort": "端口",

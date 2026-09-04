@@ -15,7 +15,7 @@
   const dispatch = createEventDispatcher<{ close: void }>();
 
   export let title: string;
-  export let description: string;
+  export let description = "";
   export let showCloseButton = false;
   export let maxWidth: number = 768; // screen-md
   export let open: boolean;
@@ -53,9 +53,11 @@
           <DialogTitle class="text-xl font-medium mb-2">
             {title}
           </DialogTitle>
-          <DialogDescription class="text-zinc-400">
-            {description}
-          </DialogDescription>
+          {#if description}
+            <DialogDescription class="text-zinc-400">
+              {description}
+            </DialogDescription>
+          {/if}
         </div>
 
         <slot />

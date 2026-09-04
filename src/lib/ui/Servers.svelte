@@ -704,7 +704,6 @@
 <!-- Add / edit server form dialog -->
 <OverlayMenu
   title={editing ? t($lang, "servers.editTitle") : t($lang, "servers.addTitle")}
-  description={t($lang, "servers.formDesc")}
   showCloseButton
   maxWidth={672}
   open={formOpen}
