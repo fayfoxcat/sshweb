@@ -207,6 +207,7 @@
       ...splitSocks5Tunnel(undefined),
       macs: [...MAC_ALGORITHMS],
       startup: "",
+      startupDir: "",
       authMethod: "password",
       keyId: "",
     };
@@ -246,6 +247,7 @@
       ...splitSocks5Tunnel(server.socks5Tunnel),
       macs: (server.macs ?? []).length > 0 ? server.macs : [...MAC_ALGORITHMS],
       startup: server.startup ?? "",
+      startupDir: server.startupDir ?? "",
       authMethod: (server.authMethod as "password" | "key") || "password",
       keyId: server.keyId ?? "",
     };
@@ -281,6 +283,7 @@
       socks5Tunnel: joinSocks5Tunnel(form),
       macs: form.macs,
       startup: form.startup,
+      startupDir: form.startupDir,
       authMethod: form.authMethod,
       keyId: form.keyId,
     };
@@ -803,6 +806,19 @@
           {/if}
         </div>
       {/if}
+    </div>
+
+    <!-- 启动目录(新建终端 / 首次打开 SFTP 的初始目录;留空 = SSH 用户主目录) -->
+    <div class="section">
+      <label class="field">
+        <span>{t($lang, "servers.startupDirLabel")}</span>
+        <input
+          class="input-base"
+          bind:value={form.startupDir}
+          placeholder={t($lang, "servers.startupDirPlaceholder")}
+        />
+      </label>
+      <p class="section-desc">{t($lang, "servers.startupDirDesc")}</p>
     </div>
 
     <!-- 启动命令 (每行一条,终端启动后执行) -->

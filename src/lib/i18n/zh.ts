@@ -288,6 +288,10 @@ const zh = {
   "startup.expand": "展开为三行编辑",
   "startup.title": "终端启动时执行的命令(每行一条)",
   "startup.desc": "终端启动后按顺序执行,每行一条命令(支持 # 注释)。",
+  "servers.startupDirLabel": "启动目录",
+  "servers.startupDirPlaceholder": "留空 = 用户主目录,如 /data/app",
+  "servers.startupDirDesc":
+    "新建终端在此目录启动、首次打开文件(SFTP)也在此浏览。留空为该 SSH 用户的主目录;支持绝对路径或 ~/…(相对主目录)。",
 
   // Editor
   "editor.close": "关闭",

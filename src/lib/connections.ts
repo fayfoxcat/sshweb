@@ -22,6 +22,7 @@ export type ServerConfig = WsServerConfig & {
   proxy: WsProxyConfig | null;
   macs: string[];
   authMethod: string;
+  startupDir: string;
 };
 
 /** Form / wire input for creating or updating a server: the saved config
@@ -55,6 +56,7 @@ function serverConfig(values: {
   proxy?: WsProxyConfig | null;
   macs?: string[];
   startup?: string;
+  startupDir?: string;
   authMethod?: string;
   keyId?: string | null;
   socks5Tunnel?: WsSocks5Tunnel | null;
@@ -71,6 +73,7 @@ function serverConfig(values: {
     proxy: values.proxy ?? null,
     macs: values.macs ?? [],
     startup: values.startup ?? "",
+    startupDir: values.startupDir ?? "",
     authMethod: values.authMethod || "password",
     keyId: values.keyId ?? undefined,
     socks5Tunnel: values.socks5Tunnel ?? undefined,
@@ -255,6 +258,7 @@ export async function updateServer(
     proxy: input.proxy,
     macs: input.macs ?? existing.macs,
     startup: input.startup ?? existing.startup,
+    startupDir: input.startupDir ?? existing.startupDir ?? "",
     authMethod: input.authMethod || existing.authMethod || "password",
     keyId: input.keyId ?? null,
     socks5Tunnel: input.socks5Tunnel,

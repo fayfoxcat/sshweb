@@ -95,6 +95,9 @@ export type WsServerConfig = {
   macs?: string[];
   /** Commands typed into the shell once the terminal starts (one per line). */
   startup?: string;
+  /** 启动目录(初始目录):新建终端在此启动、首次打开 SFTP 也在此浏览。
+   *  空串或 `~` = SSH 用户主目录;`~/…` 相对主目录展开。 */
+  startupDir?: string;
   /** Authentication method: "password" (default) or "key". */
   authMethod?: string;
   /** ID of a saved server-side SSH key used for public-key authentication. */

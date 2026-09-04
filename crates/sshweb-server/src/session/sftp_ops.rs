@@ -34,6 +34,26 @@ impl WriteOp {
     }
 }
 
+/// Resolve a configured/prompt working directory to an absolute SFTP path:
+/// empty or `~` → the probed login home; `~/…` → home + suffix. Absolute
+/// paths pass through unchanged (they are used verbatim as the browse start).
+fn resolve_start_dir(dir: &str, home: &str) -> String {
+    let dir = dir.trim();
+    if dir.is_empty() || dir == "~" || dir == "~/" {
+        return home.to_string();
+    }
+    if let Some(rest) = dir.strip_prefix("~/") {
+        return if rest.is_empty() {
+            home.to_string()
+        } else if home.is_empty() {
+            dir.to_string()
+        } else {
+            format!("{}/{}", home.trim_end_matches('/'), rest)
+        };
+    }
+    dir.to_string()
+}
+
 impl Session {
     /// Open the file manager for a shell, resolving the initial path for the
     /// terminal's server. The SFTP identity is always the **configured** user
@@ -124,11 +144,24 @@ impl Session {
         match Self::remote_timeout(pool, pool.client_probe(server)).await {
             Ok((_client, home, user)) => {
                 let (dir, notice) = if follow_terminal {
-                    let dir = shell_cwd
+                    // Terminal shells start in the configured startup dir (the
+                    // frontend sends it as the create `cwd`), so its prompt
+                    // usually already shows that dir; fall back to it when no
+                    // prompt was parsed yet. Prompts abbreviate the home dir to
+                    // `~`/`~/…`, so the chosen path is resolved to an absolute
+                    // one against the probed home before announcing it.
+                    let base = shell_cwd
                         .as_deref()
                         .filter(|s| !s.is_empty())
                         .map(|s| s.to_string())
-                        .unwrap_or(home);
+                        .unwrap_or_else(|| {
+                            if server.startup_dir.trim().is_empty() {
+                                home.clone()
+                            } else {
+                                server.startup_dir.clone()
+                            }
+                        });
+                    let dir = resolve_start_dir(&base, &home);
                     // The terminal switched to another user (su/sudo), but that
                     // identity cannot be reused for SFTP: tell the user instead
                     // of silently browsing as the configured user.
@@ -139,7 +172,9 @@ impl Session {
                         });
                     (dir, notice)
                 } else {
-                    (home, None)
+                    // Headless connect (server-list SFTP button): open at the
+                    // configured startup dir when set, else the login home.
+                    (resolve_start_dir(&server.startup_dir, &home), None)
                 };
                 self.send(WsServer::SftpOpenResult(browse_sid, dir, user, notice));
             }

@@ -399,7 +399,17 @@
     cwd: string | null = null,
   ) {
     if (guardLimit()) return;
-    rt.beginCreate(name, server, cwd);
+    // 启动目录:未显式指定目录(如「在目录中启动 SSH」会传绝对目录)时,远程
+    // 服务器按配置的启动目录创建终端;空 / `~`(=主目录)不传,由服务端默认。
+    let dir = cwd;
+    if (dir === null && server) {
+      const startupDir = (server.startupDir ?? "").trim();
+      dir =
+        startupDir === "" || startupDir === "~" || startupDir === "~/"
+          ? null
+          : startupDir;
+    }
+    rt.beginCreate(name, server, dir);
   }
 
   /** Open a new terminal starting in the given directory (SSH if the viewed

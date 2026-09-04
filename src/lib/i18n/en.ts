@@ -288,6 +288,10 @@ const en = {
   "startup.title": "Commands executed when the terminal starts (one per line)",
   "startup.desc":
     "Run in order after the terminal starts, one command per line (# comments allowed).",
+  "servers.startupDirLabel": "Startup directory",
+  "servers.startupDirPlaceholder": "Blank = home, e.g. /data/app",
+  "servers.startupDirDesc":
+    "New terminals start here and the first file (SFTP) open browses here. Leave blank for the SSH user's home; absolute paths or ~/… (relative to home) are supported.",
 
   "editor.close": "Close",
   "editor.minimize": "Minimize",

@@ -198,6 +198,10 @@ pub struct ServerConfig {
     /// executed in order as if typed). Used for e.g. `export` or `cd` setup.
     #[serde(default)]
     pub startup: String,
+    /// 启动目录(初始目录):新建终端在此目录启动、首次打开 SFTP 文件也在此浏览。
+    /// 空串或 `~` = 该 SSH 用户的主目录;`~/…` 相对主目录展开。
+    #[serde(default)]
+    pub startup_dir: String,
     /// Authentication method: `"password"` (default) or `"key"`. When `"key"`
     /// the connection authenticates with the saved server-side key referenced
     /// by [`Self::key_id`].
