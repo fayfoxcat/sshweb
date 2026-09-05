@@ -387,12 +387,68 @@ pub(crate) async fn walk_remote(
 ///
 /// Symbolic links are skipped and recursion is depth-limited (see
 /// [`walk_remote`]), so directory cycles can't hang the copy.
+///
+/// Overwrite semantics are **merge**: an existing same-named **directory** at
+/// the destination is kept and its contents merged (each source file replaces
+/// the target file; extra target files remain); only a non-directory blocking
+/// a name is removed first. This is what makes copying a folder onto an
+/// existing same-named folder succeed after the UI's overwrite decision
+/// (before, the unconditional `mkdir` on the existing dir aborted the copy).
 pub async fn copy_remote(
     pool: &SftpPool,
     server: &ServerConfig,
     from: &str,
     to: &str,
 ) -> Result<()> {
+    /// Make `dst` an existing directory, merging into an existing directory
+    /// and replacing a blocking file/symlink first.
+    async fn ensure_copy_dir(client: &Sftp, dst: &str) -> Result<()> {
+        let mut fs = client.fs();
+        if fs.create_dir(dst).await.is_ok() {
+            return Ok(());
+        }
+        // Destination already exists: an existing directory is kept (merge);
+        // anything else blocking the name is replaced with the directory.
+        match fs.symlink_metadata(dst).await {
+            Ok(meta) if meta.file_type().map(|t| t.is_dir()).unwrap_or(false) => Ok(()),
+            Ok(_) => {
+                fs.remove_file(dst).await?;
+                fs.create_dir(dst).await?;
+                Ok(())
+            }
+            // Nothing exists there: the mkdir failed for a real reason.
+            Err(_) => {
+                fs.create_dir(dst).await?;
+                Ok(())
+            }
+        }
+    }
+
+    /// Write one file, replacing whatever occupies `dst` (an existing file is
+    /// overwritten by `fs.write`; a blocking directory tree or read-only file
+    /// is removed first, then written fresh).
+    async fn overwrite_copy_file(client: &Sftp, from: &str, to: &str) -> Result<()> {
+        let data = client.fs().read(from).await?;
+        let mut fs = client.fs();
+        if fs.write(to, &data).await.is_ok() {
+            return Ok(());
+        }
+        // Blocked (existing dir, or an unwritable existing file): remove the
+        // current target so the write can recreate it. If nothing exists, the
+        // retried write surfaces the real error.
+        match fs.symlink_metadata(to).await {
+            Ok(meta) if meta.file_type().map(|t| t.is_dir()).unwrap_or(false) => {
+                remove_tree(client, to, 0).await?;
+            }
+            Ok(_) => {
+                fs.remove_file(to).await?;
+            }
+            Err(_) => {}
+        }
+        client.fs().write(to, &data).await?;
+        Ok(())
+    }
+
     struct CopyVisitor<'a> {
         src: &'a str,
         dst: &'a str,
@@ -416,12 +472,10 @@ pub async fn copy_remote(
                 )
             };
             Box::pin(async move {
-                let mut fs = client.fs();
                 if node.is_dir {
-                    fs.create_dir(&dst).await?;
+                    ensure_copy_dir(client, &dst).await?;
                 } else {
-                    let data = fs.read(fs_path).await?;
-                    fs.write(&dst, &data).await?;
+                    overwrite_copy_file(client, fs_path, &dst).await?;
                 }
                 Ok(())
             })
