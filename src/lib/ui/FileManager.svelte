@@ -530,10 +530,17 @@
     remaining: Set<string>;
   } | null = null;
 
+  /** Bytes copied so far per in-flight source path (fed by the server's
+   *  throttled `sftpCopyProgress`), for the header progress line. Cleared when
+   *  the batch finishes or fails. */
+  let copyBytesByFrom = new Map<string, number>();
+  $: copyBytesTotal = [...copyBytesByFrom.values()].reduce((a, b) => a + b, 0);
+
   /** Track a move/copy batch keyed by the source path (the `sftpOk` ack
    *  path for rename/copy). */
   function beginMoveCopy(froms: string[], kind: "move" | "copy") {
     moveCopyBatch = { kind, total: froms.length, remaining: new Set(froms) };
+    copyBytesByFrom = new Map();
   }
 
   /** Put the selected entries into the in-app clipboard as a copy or cut. */
@@ -1055,6 +1062,11 @@
     } else if (message.sftpWriteOk) {
       // A chunked-upload ack: carries the written offset for dedup/resume.
       applyWriteAck(message.sftpWriteOk);
+    } else if (message.sftpCopyProgress) {
+      // Remote-copy progress: accumulate bytes for the source path so the
+      // header line can show how much has been copied.
+      const [, copyFrom, copyBytes] = message.sftpCopyProgress;
+      copyBytesByFrom.set(copyFrom, copyBytes);
     } else if (message.error) {
       applyError(message.error);
     }
@@ -1102,8 +1114,10 @@
     if (!onUploadAck(savedShell, savedPath)) {
       const batch = moveCopyBatch;
       if (batch && batch.remaining.delete(savedPath)) {
+        copyBytesByFrom.delete(savedPath);
         if (batch.remaining.size === 0) {
           moveCopyBatch = null;
+          copyBytesByFrom = new Map();
           makeToast({
             kind: "success",
             message: t(
@@ -1151,6 +1165,7 @@
     // "复制成功/剪切成功" toast is emitted for a partial failure.
     if (message.startsWith("重命名失败") || message.startsWith("复制失败")) {
       moveCopyBatch = null;
+      copyBytesByFrom = new Map();
     }
   }
 
@@ -1253,6 +1268,16 @@
       </button>
     {/if}
   </div>
+
+  <!-- Remote-copy progress line (large copies take a while; show it moving). -->
+  {#if moveCopyBatch?.kind === "copy" && copyBytesTotal > 0}
+    <div
+      class="flex h-6 items-center gap-2 border-b border-indigo-900/40 bg-indigo-900/10 px-3 text-[11px] text-indigo-300"
+    >
+      <span>{t($lang, "file.copyProgressLabel")}</span>
+      <span class="ml-auto font-mono">{formatSize(copyBytesTotal)}</span>
+    </div>
+  {/if}
 
   <!-- Search row: helps navigate very large directories without rendering
        every row (which would freeze the browser). -->

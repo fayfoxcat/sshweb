@@ -49,6 +49,9 @@ export type WsServer = {
    *  when it could not be determined). Used to upload dropped files to the
    *  terminal's current directory. */
   pwd?: [Sid, string];
+  /** Progress of an in-flight remote `sftpCopy`: [shell, source path,
+   *  cumulative bytes copied so far], sent throttled for the progress line. */
+  sftpCopyProgress?: [Sid, string, number];
   error?: string;
 };
 

@@ -68,6 +68,11 @@ pub enum WsServer {
     /// Reply to a `PwdRequest`: the shell's current working directory (or an
     /// empty string when it could not be determined).
     Pwd(Sid, String),
+    /// Progress of an in-flight `SftpCopy` (remote copy): the shell, the
+    /// source path, and cumulative bytes copied so far. Sent throttled so the
+    /// frontend can show progress for large copies without flooding the
+    /// output queue.
+    SftpCopyProgress(Sid, String, u64),
 }
 
 /// A real-time message sent from the client over WebSocket.

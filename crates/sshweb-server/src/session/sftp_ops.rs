@@ -588,18 +588,37 @@ impl Session {
     }
 
     /// Copy a file or directory for a shell.
+    ///
+    /// Remote copies stream in blocks with a **per-request** watchdog instead
+    /// of the generic whole-operation 30s wall (已知坑 20): large directories
+    /// may run arbitrarily long, and a stalled request is retried by
+    /// reconnecting and resuming that file from its last offset. Throttled
+    /// `SftpCopyProgress` messages let the frontend show a progress line.
     pub async fn sftp_copy(&self, id: Sid, from: String, to: String) -> Result<()> {
-        self.run_pair_op(
-            id,
-            from,
-            to,
-            "copy task",
-            move |pool, server, rf, rt| async move {
-                sftp::copy_remote(&pool, &server, &rf, &rt).await
-            },
-            move |lf, lt| sftp::copy_local(&lf, &lt),
-        )
-        .await
+        let ack_path = from.clone();
+        match self.shell_target(id) {
+            Some((server, pool)) => {
+                let f = from.clone();
+                let mut last = 0u64;
+                // Report roughly once per MiB of copied bytes.
+                const PROGRESS_STEP: u64 = 1 << 20;
+                let progress = move |done: u64| {
+                    if done.saturating_sub(last) >= PROGRESS_STEP {
+                        last = done;
+                        self.send(WsServer::SftpCopyProgress(id, f.clone(), done));
+                    }
+                };
+                sftp::copy_remote(&pool, &server, &from, &to, progress).await?;
+                self.send(WsServer::SftpOk(id, ack_path));
+            }
+            None => {
+                let lf = from.clone();
+                let lt = to.clone();
+                Self::run_local(move || sftp::copy_local(&lf, &lt), "复制失败").await?;
+                self.send(WsServer::SftpOk(id, ack_path));
+            }
+        }
+        Ok(())
     }
 
     /// Stream a ZIP archive for a shell straight to an HTTP response body.

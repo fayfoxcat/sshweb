@@ -203,7 +203,8 @@ export function createSessionRuntime(env: RuntimeEnv) {
         const configs = message.shellsConfig;
         state.update((s) => {
           const shellServers = { ...s.shellServers };
-          for (const [sid, cfg] of configs) shellServers[sid] = mergeReplayConfig(cfg);
+          for (const [sid, cfg] of configs)
+            shellServers[sid] = mergeReplayConfig(cfg);
           return { ...s, shellServers };
         });
         return;
@@ -270,6 +271,11 @@ export function createSessionRuntime(env: RuntimeEnv) {
       if (message.sftpWriteOk) {
         // A chunked-upload ack carries the written offset; route it to the
         // file manager's upload bookkeeping (never a whole-file save).
+        env.onFileMessage(message);
+        return;
+      }
+      if (message.sftpCopyProgress) {
+        // Remote-copy progress: route to the file manager's progress line.
         env.onFileMessage(message);
         return;
       }

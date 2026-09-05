@@ -99,6 +99,7 @@ const en = {
 
   "file.loading": "Loading…",
   "file.currentSession": "current session",
+  "file.copyProgressLabel": "Copying…",
   "file.list": "File list",
   "file.searchN": "Search ({n} items)…",
   "file.searchHint": "Search files in {target}",

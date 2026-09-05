@@ -102,6 +102,7 @@ const zh = {
   // File manager
   "file.loading": "正在加载…",
   "file.currentSession": "当前会话",
+  "file.copyProgressLabel": "复制中…",
   "file.list": "文件列表",
   "file.searchN": "搜索（共 {n} 项）…",
   "file.searchHint": "开始检索 {target} 文件",

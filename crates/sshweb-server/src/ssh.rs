@@ -106,6 +106,12 @@ fn make_config(server: &ServerConfig) -> client::Config {
         tracing::debug!(macs = ?names.iter().map(|n| n.as_ref()).collect::<Vec<_>>(), "setting preferred MACs");
         config.preferred.mac = std::borrow::Cow::Owned(names);
     }
+    // Keep long-lived connections (terminals, big SFTP copies) alive across
+    // NAT/idle gaps: send an SSH keepalive if nothing arrives, and drop the
+    // connection after a few unanswered ones so a dead tunnel is detected
+    // promptly instead of hanging mid-transfer.
+    config.keepalive_interval = Some(std::time::Duration::from_secs(30));
+    config.keepalive_max = 3;
     config
 }
 
