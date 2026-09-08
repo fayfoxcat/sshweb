@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronDownIcon, KeyIcon } from "svelte-feather-icons";
+  import { ChevronDownIcon, KeyIcon } from "$lib/icons";
 
   import { lang, t } from "$lib/i18n";
   import { noop } from "./a11y";

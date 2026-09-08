@@ -6,7 +6,7 @@
   import { enterEscape } from "./shortcuts";
   import OverlayMenu from "./OverlayMenu.svelte";
   import themes, { type ThemeName } from "./themes";
-  import { EditIcon, PlusIcon, TrashIcon } from "svelte-feather-icons";
+  import { EditIcon, PlusIcon, TrashIcon } from "$lib/icons";
   import {
     createKey,
     deleteKey,

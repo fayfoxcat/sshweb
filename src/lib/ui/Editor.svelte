@@ -10,7 +10,7 @@
     SaveIcon,
     SearchIcon,
     XIcon,
-  } from "svelte-feather-icons";
+  } from "$lib/icons";
 
   import type { WsClient, WsServer } from "$lib/protocol";
   import { lang, t } from "$lib/i18n";

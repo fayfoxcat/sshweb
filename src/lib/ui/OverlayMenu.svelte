@@ -7,7 +7,7 @@
     Transition,
     TransitionChild,
   } from "@rgossiaux/svelte-headlessui";
-  import { XIcon } from "svelte-feather-icons";
+  import { XIcon } from "$lib/icons";
   import { createEventDispatcher } from "svelte";
 
   import { lang, t } from "$lib/i18n";

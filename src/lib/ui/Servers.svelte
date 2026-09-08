@@ -11,7 +11,7 @@
     TerminalIcon,
     TrashIcon,
     ZapIcon,
-  } from "svelte-feather-icons";
+  } from "$lib/icons";
 
   import type { WsServerConfig } from "$lib/protocol";
   import { DEFAULT_SSH_PORT, DEFAULT_SOCKS_PORT } from "$lib/constants";

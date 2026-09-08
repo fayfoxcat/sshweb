@@ -5,7 +5,7 @@
     PlusIcon,
     ServerIcon,
     SettingsIcon,
-  } from "svelte-feather-icons";
+  } from "$lib/icons";
 
   import { get } from "svelte/store";
 

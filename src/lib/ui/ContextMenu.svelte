@@ -14,7 +14,7 @@
     TypeIcon,
     UploadCloudIcon,
     UploadIcon,
-  } from "svelte-feather-icons";
+  } from "$lib/icons";
 
   import { lang, t } from "$lib/i18n";
 

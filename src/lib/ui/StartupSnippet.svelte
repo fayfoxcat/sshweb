@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
 
-  import { ChevronsDownIcon, ChevronsUpIcon } from "svelte-feather-icons";
+  import { ChevronsDownIcon, ChevronsUpIcon } from "$lib/icons";
 
   /** Startup command snippet: a one-line input (matching the other server
    *  form fields) that can expand into a three-line shell-highlighted

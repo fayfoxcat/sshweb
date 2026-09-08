@@ -13,3 +13,6 @@ target/
 # OS
 .DS_Store
 Thumbs.db
+
+# Vite 临时配置产物
+vite.config.*.timestamp-*.mjs

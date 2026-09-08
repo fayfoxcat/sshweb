@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { XIcon } from "svelte-feather-icons";
+  import { XIcon } from "$lib/icons";
 
   import { draggable, droppable } from "./dnd";
 

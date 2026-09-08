@@ -5,7 +5,7 @@
     InboxIcon,
     UploadCloudIcon,
     XIcon,
-  } from "svelte-feather-icons";
+  } from "$lib/icons";
 
   import { lang, t } from "$lib/i18n";
   import { cancelUploadTask, clearUploadTasks, uploadTasks } from "$lib/upload";

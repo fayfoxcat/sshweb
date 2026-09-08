@@ -5,7 +5,7 @@
     RefreshCwIcon,
     SearchIcon,
     XIcon,
-  } from "svelte-feather-icons";
+  } from "$lib/icons";
 
   import type { WsClient, WsServer, WsSftpEntry } from "$lib/protocol";
   import { makeToast } from "$lib/toast";

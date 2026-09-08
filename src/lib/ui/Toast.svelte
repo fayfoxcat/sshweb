@@ -5,7 +5,7 @@
     HelpCircleIcon,
     InfoIcon,
     XCircleIcon,
-  } from "svelte-feather-icons";
+  } from "$lib/icons";
 
   const dispatch = createEventDispatcher<{ action: void }>();
 

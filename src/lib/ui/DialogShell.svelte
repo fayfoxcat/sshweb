@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { XIcon } from "svelte-feather-icons";
+  import { XIcon } from "$lib/icons";
 
   import { lang, t } from "$lib/i18n";
   export let title = "";

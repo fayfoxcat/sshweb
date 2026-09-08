@@ -9,7 +9,7 @@ import {
   MusicIcon,
   TerminalIcon,
   VideoIcon,
-} from "svelte-feather-icons";
+} from "$lib/icons";
 
 /** Map a file extension to a (feather icon, tailwind color) for the listing. */
 export function fileType(name: string): { icon: any; color: string } {
