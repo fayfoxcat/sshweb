@@ -136,9 +136,10 @@ fn unauthorized() -> Response {
     error_response(StatusCode::UNAUTHORIZED, "需要登录")
 }
 
-/// authentication cookie. A session that logged in with the setup key and is
-/// still pending a forced password change is also rejected here, so pending
-/// sessions can only reach the status / change-password / logout endpoints.
+/// Require a valid authentication cookie for the request to proceed. A session
+/// that logged in with the setup key and is still pending a forced password
+/// change is also rejected here, so pending sessions can only reach the status
+/// / change-password / logout endpoints.
 pub(crate) fn require_auth(state: &ServerState, headers: &HeaderMap) -> Option<Response> {
     require_auth_inner(state, headers, true)
 }

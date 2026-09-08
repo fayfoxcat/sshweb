@@ -123,7 +123,7 @@ async fn start(args: Args) -> Result<()> {
     // First-boot: print the one-time setup key so the operator can log in and
     // set the access password. It goes to stdout (the log file under `-d`),
     // never over the network.
-    if let Some(key) = server.state().config().setup_key() {
+    if let Some(key) = server.setup_key() {
         println!("====================================================");
         println!("首次启动:请在浏览器打开本服务,使用下面的安装密钥登录,");
         println!("登录后将强制设置访问密码。此密钥仅打印一次,请妥善保存。");
@@ -161,8 +161,8 @@ fn run_config_command(args: &Args) -> Result<()> {
     let path = args
         .config
         .clone()
-        .unwrap_or_else(sshweb_server::config::ConfigStore::default_path);
-    let store = sshweb_server::config::ConfigStore::new(path)?;
+        .unwrap_or_else(sshweb_server::ConfigStore::default_path);
+    let store = sshweb_server::ConfigStore::new(path)?;
 
     match cmd {
         Command::Export { output } => {

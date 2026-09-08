@@ -21,13 +21,13 @@
 
 <div class="toast-box">
   {#if kind === "info"}
-    <InfoIcon class="w-5 h-5 text-accent-lime flex-shrink-0" />
+    <InfoIcon class="w-5 h-5 text-lime-300 flex-shrink-0" />
   {:else if kind === "success"}
     <CheckCircleIcon class="w-5 h-5 text-green-300 flex-shrink-0" />
   {:else if kind === "error"}
     <XCircleIcon class="w-5 h-5 text-red-300 flex-shrink-0" />
   {:else}
-    <HelpCircleIcon class="w-5 h-5 text-accent-lime flex-shrink-0" />
+    <HelpCircleIcon class="w-5 h-5 text-lime-300 flex-shrink-0" />
   {/if}
 
   <p class="ml-3">

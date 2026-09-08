@@ -15,9 +15,9 @@ use crate::web::protocol::{ServerConfig, WsServer};
 
 /// An ordered-file write operation (chunked uploads + whole-file saves),
 /// applied strictly in FIFO order by the single worker spawned with the
-/// session — see `Session::new`. **Unbounded**: a bounded channel with
-/// `try_send` silently dropped chunks, producing incomplete files the client
-/// believed to be fully uploaded (已知坑 19).
+/// session — see `Session::new`. The channel is **bounded** (`WRITE_QUEUE_CAP`,
+/// 已知坑 65 / 安全审查 M4): when full, a new write is rejected with a
+/// "写入队列已满" error rather than silently dropped or buffered without bound.
 pub(crate) enum WriteOp {
     /// Chunked upload write (`offset == 0` truncates/creates).
     WriteAt(Sid, String, u64, Bytes),

@@ -60,7 +60,6 @@
   export let write: (data: string) => void; // bound function prop
   export let active: boolean; // whether this terminal is the visible tab
 
-  export let title: string = "Terminal"; // bound prop, updated on title change
   let element: HTMLDivElement;
   let term: Terminal | null = null;
   let fitAddon: FitAddon | null = null;
@@ -254,9 +253,6 @@
     });
 
     term.resize(cols, rows);
-    term.onTitleChange((newTitle) => {
-      title = newTitle;
-    });
 
     loaded = true;
     for (const data of preloadBuffer) {

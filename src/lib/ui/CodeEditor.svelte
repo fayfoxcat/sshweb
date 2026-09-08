@@ -426,9 +426,6 @@
     .cm-diff-added {
       box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.8);
     }
-    .cm-diff-removed {
-      box-shadow: inset 3px 0 0 rgba(113, 113, 122, 0.8);
-    }
     .cm-diff-modified {
       box-shadow: inset 3px 0 0 rgba(59, 130, 246, 0.8);
     }

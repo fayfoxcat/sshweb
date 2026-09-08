@@ -252,7 +252,6 @@ pub async fn remove_remote(
 /// the 30s hard timeout when serial). `Sftp` is `Send + Sync`, each child
 /// future owns its own `Fs`, so the concurrent futures are safe.
 async fn remove_tree(sftp: &Sftp, path: &str, depth: u32) -> Result<()> {
-    use futures_util::StreamExt;
     if depth > 32 {
         return Ok(());
     }

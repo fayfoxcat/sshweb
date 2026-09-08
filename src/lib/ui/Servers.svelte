@@ -629,7 +629,7 @@
                 <p class="truncate text-sm text-zinc-200">{server.name}</p>
               </div>
               <p class="truncate text-xs text-zinc-500">
-                {server.username}@{server.host}:{server.port}
+                {serverTargetKey(server)}
               </p>
             </div>
             <div
@@ -1084,14 +1084,6 @@
 />
 
 <style lang="postcss">
-  .field {
-    @apply flex flex-col gap-1 text-sm text-zinc-300;
-  }
-
-  .btn-primary {
-    @apply inline-flex items-center gap-1 rounded-md bg-indigo-900 px-3 py-1.5 text-sm font-medium text-indigo-100 transition-colors hover:bg-indigo-800;
-  }
-
   .btn-secondary {
     @apply rounded-md px-3 py-1.5 text-sm text-zinc-300 transition-colors hover:bg-zinc-700;
   }

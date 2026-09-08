@@ -1,4 +1,5 @@
-// Simple async lock for use in streaming encryption.
+// Simple FIFO async lock. Used to serialize per-shell terminal chunk writes
+// (xterm is not safe for concurrent `write` calls), queued in Session.svelte.
 // See <https://stackoverflow.com/a/74538176>.
 export function createLock() {
   const queue: (() => Promise<void>)[] = [];

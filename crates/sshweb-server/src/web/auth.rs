@@ -41,14 +41,6 @@ pub(crate) fn cookie_header(headers: &HeaderMap) -> Option<&str> {
         .and_then(|value| value.to_str().ok())
 }
 
-/// Extract a single cookie value by name from a `Cookie` header.
-fn cookie_value<'a>(header: Option<&'a str>, name: &str) -> Option<&'a str> {
-    header?.split(';').find_map(|part| {
-        let (key, value) = part.trim().split_once('=')?;
-        (key == name).then_some(value)
-    })
-}
-
 /// Build the auth cookie. `Secure` is only set when serving over HTTPS, so the
 /// cookie keeps working on plain HTTP while still being protected from
 /// sniffing on a TLS deployment.
@@ -72,8 +64,8 @@ pub(crate) async fn get_auth_status(
     headers: HeaderMap,
 ) -> Json<AuthStatus> {
     let config = state.config();
-    let token =
-        cookie_header(&headers).and_then(|h| cookie_value(Some(h), crate::config::cookie_name()));
+    let token = cookie_header(&headers)
+        .and_then(|h| crate::config::cookie_value(Some(h), crate::config::cookie_name()));
     Json(AuthStatus {
         setup: config.is_setup(),
         authenticated: config.is_authenticated(cookie_header(&headers)),

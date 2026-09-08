@@ -67,6 +67,21 @@
            never runs under the chevron. */
         padding-right: 2rem !important;
     }
+
+    /* Shared labeled field wrapper (a `<label>` stacking a caption above its
+       input). Identical in AuthGate.svelte and Servers.svelte; hoisted here
+       next to `.input-base` (see 已知坑 53 for the shared-CSS convention). */
+    .field {
+        @apply flex flex-col gap-1 text-sm text-zinc-300;
+    }
+
+    /* Shared primary action button. Canonical look is the in-panel primary
+       used by Servers.svelte's form footer (indigo-900 / py-1.5). AuthGate's
+       login CTA reuses the same class: as a flex item in a column layout it
+       blockifies to `flex justify-center`, so its label stays centred. */
+    .btn-primary {
+        @apply inline-flex items-center justify-center gap-1 rounded-md bg-indigo-900 px-3 py-1.5 text-sm font-medium text-indigo-100 transition-colors hover:bg-indigo-800 disabled:cursor-not-allowed disabled:opacity-50;
+    }
 }
 
 /* Thin, translucent scrollbar shared by the terminal (xterm) and the

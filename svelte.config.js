@@ -13,7 +13,10 @@ const config = {
 
   kit: {
     adapter: adapter({
-      fallback: "spa.html", // SPA mode
+      // `/` is prerendered to `index.html`; unknown-route SPA fallback is
+      // served by the Rust embed layer (web/embed.rs::SPA_SHELL = index.html),
+      // so the adapter needs no own `fallback` copy (avoids emitting a dead
+      // `spa.html` that embed.rs never serves).
       precompress: true,
     }),
   },

@@ -17,19 +17,29 @@ use utils::Shutdown;
 use crate::state::ServerState;
 use crate::tls::PeerInfo;
 
-pub mod config;
+mod config;
 mod listen;
-pub mod proxy;
-pub mod runner;
-pub mod session;
-pub mod sftp;
-pub mod ssh;
-pub mod state;
-pub mod stats;
-pub mod terminal;
-pub mod tls;
-pub mod utils;
-pub mod web;
+mod proxy;
+mod runner;
+mod session;
+mod sftp;
+mod ssh;
+mod state;
+mod stats;
+mod terminal;
+mod tls;
+mod utils;
+mod web;
+
+/// The only consumers are the `sshweb` binary (this package's `main.rs`) and
+/// the crate's own unit tests, so the public surface is a small root facade:
+/// the [`Server`] handle and [`ServerOptions`], plus the
+/// encrypted-configuration data model and the SSH/wire types that model embeds
+/// (implementation modules are crate-private).
+pub use config::{
+    ConfigStore, KeyInfo, ServerRow, ServerSettings, Status, StoredKey, StoredServerConfig,
+};
+pub use web::protocol::{JumpHost, ProxyConfig, ServerConfig, Socks5Tunnel};
 
 /// Options when constructing the application server.
 #[derive(Clone, Debug, Default)]
@@ -69,17 +79,26 @@ impl Server {
         })
     }
 
-    /// Returns the server's state object.
-    pub fn state(&self) -> Arc<ServerState> {
+    /// Returns the server's internal state (crate-private; the binary only
+    /// needs the small public accessors such as [`Self::setup_key`]).
+    pub(crate) fn state(&self) -> Arc<ServerState> {
         Arc::clone(&self.state)
+    }
+
+    /// The one-time install key, printed by the CLI on first boot so the
+    /// operator can log in and set the access password. `None` once the store
+    /// is configured or the key has been consumed.
+    pub fn setup_key(&self) -> Option<String> {
+        self.state.config().setup_key()
     }
 
     /// Run the application server, listening on a connection stream. The
     /// listener must expose `SocketAddr` as its address so `ConnectInfo` (the
     /// auth rate limiter's client IP) is available; the concrete listeners are
     /// a `NoDelayListener` (plain HTTP) or `TlsListener<NoDelayListener>`
-    /// (HTTPS, see `tls.rs`).
-    pub async fn listen<L>(&self, listener: L) -> Result<()>
+    /// (HTTPS, see `tls.rs`). Crate-private: the binary enters through
+    /// [`Self::bind`].
+    pub(crate) async fn listen<L>(&self, listener: L) -> Result<()>
     where
         L: Listener<Addr = SocketAddr> + Send + 'static,
         for<'a> PeerInfo: Connected<IncomingStream<'a, L>>,
@@ -104,7 +123,7 @@ impl Server {
         listen::start_server(self.state(), listener, self.shutdown.wait()).await
     }
 
-    /// Convenience function to call [`Server::listen`] bound to a TCP address.
+    /// Convenience function to call `Server::listen` bound to a TCP address.
     ///
     /// This also sets `TCP_NODELAY` on the incoming connections for performance
     /// reasons, as a reasonable default. When TLS options are configured the

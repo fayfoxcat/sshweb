@@ -251,6 +251,7 @@ impl ConfigStore {
     }
 
     /// Configure the first access password and create an authenticated session.
+    #[cfg(test)]
     pub fn setup(&self, password: &str, confirmation: &str) -> Result<String> {
         if self.is_setup() {
             bail!("访问密码已经设置");
@@ -881,7 +882,7 @@ fn set_private_permissions(_path: &Path) -> Result<()> {
 }
 
 /// Extract a single cookie value by name from a `Cookie` header.
-fn cookie_value<'a>(header: Option<&'a str>, name: &str) -> Option<&'a str> {
+pub(crate) fn cookie_value<'a>(header: Option<&'a str>, name: &str) -> Option<&'a str> {
     header?.split(';').find_map(|part| {
         let (key, value) = part.trim().split_once('=')?;
         (key == name).then_some(value)

@@ -33,7 +33,7 @@ pub use local::{
     copy_local, list_local, mkdir_local, read_local, remove_local, rename_local, write_at_local,
     write_local,
 };
-pub use pool::{open_sftp_probe, SftpConnectError, SftpPool};
+pub use pool::{SftpConnectError, SftpPool};
 pub use reader::{reader_local, reader_remote, size_local, size_remote, DownloadReader};
 pub use remote::{
     copy_remote, list_remote, mkdir_remote, read_remote, remove_remote, rename_remote,

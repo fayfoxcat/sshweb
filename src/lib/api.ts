@@ -1,7 +1,7 @@
 import { tr } from "./i18n";
 
 /** Whether a response carries a JSON body (API responses do; the SPA fallback
- *  serving `spa.html` for unknown routes does not). */
+ *  — the embedded `index.html` shell served for unknown routes — does not). */
 function isJson(response: Response): boolean {
   return (response.headers.get("content-type") ?? "").includes(
     "application/json",

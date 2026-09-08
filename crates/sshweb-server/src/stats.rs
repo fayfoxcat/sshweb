@@ -199,7 +199,10 @@ pub struct HostStats {
 
 impl HostStats {
     /// Whether at least one sample has been received (`time` is set by the
-    /// first sample, so a zero time means "not available yet").
+    /// first sample, so a zero time means "not available yet"). Only used by
+    /// unit tests — live consumers read `time` directly, so this stays out of
+    /// the production surface.
+    #[cfg(test)]
     pub fn available(&self) -> bool {
         self.time != 0
     }

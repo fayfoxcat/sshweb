@@ -21,10 +21,13 @@
 </pre>
     {/if}
     <p>
-      也许可以稍后再试？如果您有任何反馈，欢迎通过
-      <a class="underline text-white" href="mailto:ekzhang1@gmail.com"
-        >ekzhang1@gmail.com</a
-      > 联系我们。
+      也许可以稍后再试？如果您有任何反馈，欢迎到项目
+      <a
+        class="underline text-white"
+        href="https://github.com/fayfoxcat/sshweb/issues"
+        target="_blank"
+        rel="noreferrer">提交 issue</a
+      >。
     </p>
   </div>
 

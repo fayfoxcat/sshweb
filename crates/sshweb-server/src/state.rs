@@ -119,14 +119,6 @@ impl ServerState {
         }
     }
 
-    /// Remove a session from the local store.
-    pub fn unregister(&self, session: &Arc<Session>) {
-        let name = session.name().to_string();
-        if let Some((_, prev)) = self.store.remove(&name) {
-            prev.shutdown();
-        }
-    }
-
     /// Reap sessions that have had no attached client for the idle TTL. Runs
     /// on a background sweeper; a session is only ever reclaimed while idle,
     /// so an attached client never sees its session shut down.

@@ -8,7 +8,7 @@ use std::task::{Context, Poll};
 use anyhow::Result;
 use close_fds::CloseFdsBuilder;
 use nix::errno::Errno;
-use nix::libc::{login_tty, TIOCGWINSZ, TIOCSWINSZ};
+use nix::libc::{login_tty, TIOCSWINSZ};
 use nix::pty::{self, Winsize};
 use nix::sys::signal::{kill, Signal::SIGKILL};
 use nix::sys::wait::waitpid;
@@ -104,8 +104,11 @@ impl Terminal {
         execvp(shell, &[shell])
     }
 
-    /// Get the window size of the TTY.
+    /// Get the window size of the TTY. Only used by unit tests (production
+    /// resizing only ever sets the size), so it stays out of the shipped crate.
+    #[cfg(test)]
     pub fn get_winsize(&self) -> Result<(u16, u16)> {
+        use nix::libc::TIOCGWINSZ;
         nix::ioctl_read_bad!(ioctl_get_winsize, TIOCGWINSZ, Winsize);
         let mut winsize = make_winsize(0, 0);
         // Safety: The master file descriptor was created by openpty().

@@ -193,9 +193,11 @@ pub struct Session {
     /// it.
     active: RwLock<Option<Sid>>,
 
-    /// blocking the WebSocket message loop. **Bounded** (`WRITE_QUEUE_CAP`):
-    /// when full, new writes are rejected with an error rather than silently
-    /// dropped or buffered without bound (已知坑 19 + 安全审查 M4).
+    /// Bounded queue of pending file writes, drained by a single background
+    /// worker so the WebSocket message loop is never blocked on disk I/O.
+    /// **Bounded** (`WRITE_QUEUE_CAP`): when full, new writes are rejected
+    /// with an error rather than silently dropped or buffered without bound
+    /// (已知坑 19 + 安全审查 M4).
     write_queue: mpsc::Sender<WriteOp>,
 
     /// Set when this session has been closed and removed.
