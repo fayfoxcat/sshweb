@@ -143,9 +143,8 @@
     const { EditorState, StateEffect, StateField } = stateMod;
     RangeSet = stateMod.RangeSet;
     RangeSetBuilder = stateMod.RangeSetBuilder;
-    const { history, defaultKeymap, historyKeymap, undo, redo } = await import(
-      "@codemirror/commands"
-    );
+    const { history, defaultKeymap, historyKeymap, undo, redo } =
+      await import("@codemirror/commands");
     const searchMod_ = await import("@codemirror/search");
     searchMod = searchMod_;
     const {
@@ -161,9 +160,8 @@
       closeSearchPanel,
       searchPanelOpen,
     } = searchMod_;
-    const { syntaxHighlighting, defaultHighlightStyle } = await import(
-      "@codemirror/language"
-    );
+    const { syntaxHighlighting, defaultHighlightStyle } =
+      await import("@codemirror/language");
 
     undoCmd = undo;
     redoCmd = redo;
@@ -381,7 +379,7 @@
   });
 </script>
 
-<div class="h-full w-full" bind:this={containerEl} />
+<div class="h-full w-full" bind:this={containerEl}></div>
 
 <svelte:head>
   <style>

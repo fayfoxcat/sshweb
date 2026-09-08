@@ -103,7 +103,7 @@
     </button>
   </div>
   {#if expanded}
-    <div class="overflow-hidden rounded-md leading-none" bind:this={host} />
+    <div class="overflow-hidden rounded-md leading-none" bind:this={host}></div>
   {:else}
     <input
       class="input-base font-mono text-xs text-zinc-200 placeholder:text-zinc-600"

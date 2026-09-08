@@ -24,7 +24,7 @@
   $: inputLang = $lang;
 
   let initialized = false;
-  $: open, (initialized = false);
+  $: (open, (initialized = false));
   $: if (!initialized) {
     initialized = true;
     inputTheme = $settings.theme;
@@ -359,7 +359,6 @@
     </div>
   </div>
 
-  <!-- svelte-ignore missing-declaration -->
   <p class="mt-6 text-sm text-right text-zinc-400">
     <a target="_blank" rel="noreferrer" href="https://github.com/ekzhang/sshx"
       >sshweb v{__APP_VERSION__}</a

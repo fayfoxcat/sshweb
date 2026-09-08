@@ -449,7 +449,7 @@
 
       {#if edited}
         <span class="flex items-center gap-1 text-xs text-amber-400">
-          <span class="h-1.5 w-1.5 rounded-full bg-amber-400" />{t(
+          <span class="h-1.5 w-1.5 rounded-full bg-amber-400"></span>{t(
             $lang,
             "editor.modified",
           )}
@@ -463,7 +463,7 @@
         >
       {/if}
 
-      <div class="flex-1" />
+      <div class="flex-1"></div>
 
       <!-- Encoding selector -->
       <div class="relative">
@@ -564,7 +564,7 @@
       {#if lightMode}
         <span class="text-amber-400">{t($lang, "editor.lightStatus")}</span>
       {/if}
-      <div class="flex-1" />
+      <div class="flex-1"></div>
       <span
         >{t($lang, "editor.lineCol", {
           line: cursorLine,
@@ -582,7 +582,7 @@
       on:pointermove={resizeDrag.onMove}
       on:pointerup={resizeDrag.onEnd}
       on:pointercancel={resizeDrag.onEnd}
-    />
+    ></div>
   </div>
 </div>
 

@@ -90,11 +90,11 @@
                     <div
                       class="h-full rounded-full bg-sky-500 transition-[width] duration-200"
                       style:width={`${progressPct(task)}%`}
-                    />
+                    ></div>
                   {:else}
                     <div
                       class="h-full w-1/3 animate-pulse rounded-full bg-zinc-500"
-                    />
+                    ></div>
                   {/if}
                 </div>
               {/if}

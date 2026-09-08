@@ -34,6 +34,6 @@
       on:pointermove={resize.onMove}
       on:pointerup={resize.onEnd}
       on:pointercancel={resize.onEnd}
-    />
+    ></div>
   {/if}
 </aside>

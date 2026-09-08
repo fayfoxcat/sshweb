@@ -300,4 +300,4 @@
     if (payload.entries.length === 0 && payload.files.length === 0) return;
     dispatch("dropfiles", { payload });
   }}
-/>
+></div>

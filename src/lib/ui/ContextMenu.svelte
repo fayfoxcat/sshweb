@@ -95,7 +95,7 @@
       </div>
     {/if}
   </div>
-  <div class="my-1 border-t border-zinc-800" />
+  <div class="my-1 border-t border-zinc-800"></div>
   <!-- 上传 (flyout: 上传文件 / 上传文件夹) -->
   <div
     class="relative"
@@ -146,7 +146,7 @@
     <TypeIcon size="14" class="shrink-0" />
     <span>{t($lang, "file.menuRename")}</span>
   </button>
-  <div class="my-1 border-t border-zinc-800" />
+  <div class="my-1 border-t border-zinc-800"></div>
   <button
     class={menuItemClass(selectedCount === 0)}
     disabled={selectedCount === 0}
@@ -180,7 +180,7 @@
         : t($lang, "file.menuPaste")}</span
     >
   </button>
-  <div class="my-1 border-t border-zinc-800" />
+  <div class="my-1 border-t border-zinc-800"></div>
   <button
     class={menuItemClass(selectedCount === 0)}
     disabled={selectedCount === 0}
@@ -199,7 +199,7 @@
     <TrashIcon size="14" class="shrink-0" />
     <span>{t($lang, "file.menuDelete")}</span>
   </button>
-  <div class="my-1 border-t border-zinc-800" />
+  <div class="my-1 border-t border-zinc-800"></div>
   <button
     class={menuItemClass(false)}
     on:click|stopPropagation={() => fire("copyPath")}

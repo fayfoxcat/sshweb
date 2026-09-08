@@ -35,7 +35,7 @@
       on:click={cancel}
       on:keydown={noop}
       use:enterEscape={{ onEscape: cancel }}
-    />
+    ></div>
     <DialogShell
       {title}
       {message}

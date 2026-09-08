@@ -1,11 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from "svelte";
-  import {
-    FolderIcon,
-    PlusIcon,
-    ServerIcon,
-    SettingsIcon,
-  } from "$lib/icons";
+  import { FolderIcon, PlusIcon, ServerIcon, SettingsIcon } from "$lib/icons";
 
   import { get } from "svelte/store";
 
@@ -307,7 +302,7 @@
   }
 
   // Restart the stats timer whenever the active tab changes.
-  $: activeId, connected, restartStats();
+  $: (activeId, connected, restartStats());
   /** Drop stats of closed shells so a long session doesn't accumulate stale
    *  records (only the active shell is ever polled). */
   $: {
@@ -436,7 +431,7 @@
   /** Tab bar "+": 跟随激活终端所在服务器新建终端——远程终端 → 同服务器新终端,本地
    *  终端 → 本地。无激活终端时回退为本地。 */
   function handleCreateFollowingActive() {
-    const server = activeId >= 0 ? shellServers[activeId] ?? null : null;
+    const server = activeId >= 0 ? (shellServers[activeId] ?? null) : null;
     createShell(server ? server.name : t($lang, "session.tabDefault"), server);
   }
 
@@ -695,7 +690,7 @@
       <SettingsIcon size="18" />
     </button>
 
-    <div class="mx-1 h-5 border-l border-zinc-800" />
+    <div class="mx-1 h-5 border-l border-zinc-800"></div>
 
     <div
       class="flex flex-1 items-center gap-1 overflow-x-auto no-scrollbar"
@@ -705,7 +700,7 @@
         onDragLeave: () => {},
       }}
     >
-      {#each shells as [shellId, winsize] (shellId)}
+      {#each shells as [shellId] (shellId)}
         <Tab
           variant="terminal"
           active={shellId === activeId}
@@ -750,7 +745,7 @@
         title={linkOk
           ? t($lang, "session.connected")
           : t($lang, "session.disconnected")}
-      />
+      ></div>
     </div>
   </header>
 
@@ -851,7 +846,7 @@
             class="h-1 w-1 shrink-0 rounded-full"
             class:bg-amber-400={dirtyPaths.has(key)}
             class:bg-transparent={!dirtyPaths.has(key)}
-          />
+          ></span>
           <span class="max-w-[110px] truncate">{basename(path)}</span>
           {#if name}
             <span
