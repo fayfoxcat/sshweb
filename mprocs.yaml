@@ -7,4 +7,9 @@ procs:
       --port 2223
   web:
     shell: npm run dev
-    stop: SIGKILL  # TODO: Why is this necessary?
+    # 退出时硬杀的原因: `npm run dev` 是 npm → sh → node(vite) → esbuild 的多层
+    # 派生;mprocs 关闭时对最外层进程发的 SIGTERM 不会可靠转发到 vite/esbuild,
+    # 常留下仍占用 5173 的孤儿 vite 进程,导致下次启动报"端口已被占用"。SIGKILL
+    # 确保整棵进程树退干净。更彻底的修法是去掉 npm/sh 中间层直接跑 vite(使
+    # SIGTERM 直达),验证后即可把此处改回默认 SIGTERM。
+    stop: SIGKILL

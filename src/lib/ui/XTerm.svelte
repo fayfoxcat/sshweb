@@ -37,7 +37,6 @@
   import { browser } from "$app/environment";
 
   import { createEventDispatcher, onDestroy, onMount } from "svelte";
-  import { debounce } from "lodash-es";
   import type { Terminal } from "sshx-xterm";
   import type { FitAddon } from "xterm-addon-fit";
   import { Buffer } from "buffer";
@@ -49,6 +48,19 @@
 
   /** Used to determine Cmd versus Ctrl keyboard shortcuts. */
   const isMac = browser && navigator.platform.startsWith("Mac");
+
+  /** Minimal trailing debounce — replaces `lodash-es` `debounce`, the app's
+   *  only lodash use, so the vulnerable lodash-es bundle is never shipped. */
+  function debounce<A extends unknown[]>(
+    fn: (...args: A) => void,
+    wait: number,
+  ) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    return (...args: A): void => {
+      clearTimeout(timer);
+      timer = setTimeout(() => fn(...args), wait);
+    };
+  }
 
   const dispatch = createEventDispatcher<{
     data: Uint8Array;
