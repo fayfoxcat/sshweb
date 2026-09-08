@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { flip } from "svelte/animate";
   import { fly } from "svelte/transition";
-  import { Portal } from "@rgossiaux/svelte-headlessui";
+  import Portal from "./Portal.svelte";
 
   import Toast from "./Toast.svelte";
   import { toastStore } from "$lib/toast";
