@@ -3,9 +3,13 @@
   import { formatDateTime, formatSize } from "$lib/format";
   import { lang, t } from "$lib/i18n";
 
-  export let entry: WsSftpEntry;
-  export let x: number;
-  export let y: number;
+  interface Props {
+    entry: WsSftpEntry;
+    x: number;
+    y: number;
+  }
+
+  let { entry, x, y }: Props = $props();
 </script>
 
 <div
