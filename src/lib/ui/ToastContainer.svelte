@@ -1,3 +1,4 @@
+<svelte:options runes={true} />
 <script lang="ts">
   import { onMount } from "svelte";
   import { flip } from "svelte/animate";

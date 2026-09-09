@@ -1,3 +1,4 @@
+<svelte:options runes={true} />
 <script lang="ts">
   import Session from "$lib/Session.svelte";
 
