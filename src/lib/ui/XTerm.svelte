@@ -1,5 +1,5 @@
 <!-- @component Interactive terminal rendered with xterm.js -->
-<script lang="ts" context="module">
+<script module lang="ts">
   import { tr } from "$lib/i18n";
   import { makeToast } from "$lib/toast";
 
@@ -46,6 +46,28 @@
   import { copyText, readClipboard } from "$lib/clipboard";
   import { readDropPayload, type DropPayload } from "$lib/upload";
 
+  const dispatch = createEventDispatcher<{
+    data: Uint8Array;
+    resize: { rows: number; cols: number };
+    dropfiles: { payload: DropPayload };
+  }>();
+
+  interface Props {
+    rows: number;
+    cols: number;
+    /** Bound by the parent: the shell's chunk writer. */
+    write?: (data: string) => void;
+    /** Whether this terminal is the visible tab. */
+    active: boolean;
+  }
+
+  let {
+    rows,
+    cols,
+    write = $bindable<(data: string) => void>(() => {}),
+    active,
+  }: Props = $props();
+
   /** Used to determine Cmd versus Ctrl keyboard shortcuts. */
   const isMac = browser && navigator.platform.startsWith("Mac");
 
@@ -62,29 +84,21 @@
     };
   }
 
-  const dispatch = createEventDispatcher<{
-    data: Uint8Array;
-    resize: { rows: number; cols: number };
-    dropfiles: { payload: DropPayload };
-  }>();
-
-  export let rows: number, cols: number;
-  export let write: (data: string) => void; // bound function prop
-  export let active: boolean; // whether this terminal is the visible tab
-
-  let element: HTMLDivElement;
+  let element = $state<HTMLDivElement>();
   let term: Terminal | null = null;
   let fitAddon: FitAddon | null = null;
 
-  $: theme = themes[$settings.theme];
+  let theme = $derived(themes[$settings.theme]);
+  let loaded = $state(false);
 
-  $: if (term) {
-    // If the theme changes, update existing terminals' appearance.
-    term.options.theme = theme;
-    term.options.scrollback = $settings.scrollback;
-  }
-
-  let loaded = false;
+  // When the theme / scrollback settings change, apply them to existing
+  // terminals' appearance.
+  $effect(() => {
+    if (term) {
+      term.options.theme = theme;
+      term.options.scrollback = $settings.scrollback;
+    }
+  });
 
   /** Resize the terminal to fill its container, then notify the server. */
   async function fit() {
@@ -108,9 +122,9 @@
     }, 0);
   }
 
-  $: if (term && active) {
-    claimFocus();
-  }
+  $effect(() => {
+    if (term && active) claimFocus();
+  });
 
   onMount(() => {
     const onResize = debounce(() => fit(), 150);
@@ -148,11 +162,7 @@
   }
 
   /** Right-click paste: read the OS clipboard and feed it through the fork's
-   *  own `paste()` (bracketed-paste aware, same as Ctrl+V). An empty read is a
-   *  legitimately empty clipboard (nothing to paste, no error); a failed read
-   *  reports the cause — the page is not a secure context (plain HTTP from a
-   *  LAN origin blocks clipboard reads outright) vs. the browser denied the
-   *  read permission. */
+   *  own `paste()` (bracketed-paste aware, same as Ctrl+V). */
   async function pasteOnRightClick() {
     const result = await readClipboard();
     if (result.ok) {
@@ -202,12 +212,6 @@
     });
 
     // Copy / paste + natural text-editing shortcuts.
-    //   - Ctrl/Cmd+C with a selection  → copy the selection (no ^C);
-    //   - Ctrl/Cmd+C without selection → send ^C (SIGINT) to the shell;
-    //   - Ctrl/Cmd+V                   → paste. Returning false stops xterm
-    //     from sending ^V; the browser's default paste then fires the
-    //     `paste` event on the textarea, which the fork handles natively
-    //     (`handlePasteEvent`), delivering the clipboard text exactly once.
     term.attachCustomKeyEventHandler((event) => {
       const primary = isMac
         ? event.metaKey && !event.ctrlKey && !event.altKey
@@ -228,7 +232,6 @@
           if (event.key === "v" || event.key === "V") {
             return false;
           }
-          // Ctrl+Shift+C is a browser-level shortcut; leave it alone.
         }
         if (event.key === "ArrowLeft") {
           dispatch("data", new Uint8Array([0x01]));
@@ -250,14 +253,13 @@
     fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
 
-    term.open(element);
+    term.open(element!);
 
     // Paste is handled by the fork's own `paste` listener on the textarea
     // (reads the clipboard, applies bracketed-paste mode and sends it). We do
     // NOT add our own paste listener — it would send the text twice.
 
-    // Right-click pastes the clipboard into the terminal (like Ctrl+V), which
-    // is the expected behaviour on Linux-style terminals.
+    // Right-click pastes the clipboard into the terminal (like Ctrl+V).
     term.element?.addEventListener("contextmenu", (event: MouseEvent) => {
       event.preventDefault();
       term?.focus();
@@ -286,12 +288,14 @@
   bind:this={element}
   style:background={theme.background}
   style:opacity={loaded ? 1.0 : 0.0}
-  on:dragover|preventDefault={(event) => {
+  ondragover={(event) => {
+    event.preventDefault();
     if (event.dataTransfer?.types?.includes("Files")) {
       event.dataTransfer.dropEffect = "copy";
     }
   }}
-  on:drop|preventDefault={(event) => {
+  ondrop={(event) => {
+    event.preventDefault();
     // Local files/folders dropped onto the terminal: snapshot the entries
     // synchronously (webkitGetAsEntry — dataTransfer.files loses folder
     // structure) and forward to the parent, which queries the shell's pwd
