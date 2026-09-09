@@ -8,9 +8,14 @@
    *  CodeMirror editor. */
   import { lang, t } from "$lib/i18n";
 
-  export let value = "";
-  let expanded = false;
-  let host: HTMLDivElement;
+  interface Props {
+    value?: string;
+  }
+
+  let { value = $bindable("") }: Props = $props();
+
+  let expanded = $state(false);
+  let host = $state<HTMLDivElement>();
   let view: { destroy: () => void } | null = null;
 
   async function mountEditor() {
@@ -93,7 +98,7 @@
       title={expanded
         ? t($lang, "startup.collapse")
         : t($lang, "startup.expand")}
-      on:click={toggleExpanded}
+      onclick={toggleExpanded}
     >
       {#if expanded}
         <ChevronsDownIcon size="14" />

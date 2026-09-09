@@ -1,27 +1,41 @@
 <script lang="ts">
   import { ChevronDownIcon, KeyIcon } from "$lib/icons";
-
   import { lang, t } from "$lib/i18n";
   import type { SshKey } from "$lib/keys";
 
-  /** Saved keys selectable from the dropdown. */
-  export let keys: SshKey[] = [];
-  /** Password value for password authentication. */
-  export let password = "";
-  /** Selected key id (key authentication), or null/undefined for password
-   *  mode. The private key itself never reaches the browser. */
-  export let keyId: string | null | undefined = null;
-  export let placeholder = "";
+  interface Props {
+    /** Saved keys selectable from the dropdown. */
+    keys?: SshKey[];
+    /** Password value for password authentication. */
+    password?: string;
+    /** Selected key id (key authentication), or null/undefined for password
+     *  mode. The private key itself never reaches the browser. */
+    keyId?: string | null | undefined;
+    placeholder?: string;
+  }
 
-  let open = false;
+  let {
+    keys = [],
+    password = $bindable(""),
+    keyId = $bindable<string | null | undefined>(null),
+    placeholder = "",
+  }: Props = $props();
+
+  let open = $state(false);
   let inputEl: HTMLInputElement;
 
-  $: selectedKey = keyId ? keys.find((k) => k.id === keyId) : undefined;
+  let selectedKey = $derived(
+    keyId ? keys.find((k) => k.id === keyId) : undefined,
+  );
   /** Input display: the key name in key mode, the password otherwise. */
-  $: displayValue = selectedKey ? selectedKey.name : keyId ? keyId : password;
-  $: title = keyId
-    ? t($lang, "servers.jumpKeyAuth", { name: selectedKey?.name ?? keyId })
-    : t($lang, "servers.jumpPwdAuth");
+  let displayValue = $derived(
+    selectedKey ? selectedKey.name : keyId ? keyId : password,
+  );
+  let title = $derived(
+    keyId
+      ? t($lang, "servers.jumpKeyAuth", { name: selectedKey?.name ?? keyId })
+      : t($lang, "servers.jumpPwdAuth"),
+  );
 
   /** Manual input switches to password authentication. */
   function onInput(event: Event) {
@@ -57,7 +71,7 @@
   }
 </script>
 
-<div class="relative min-w-0 w-full" on:focusout={onWrapperFocusOut}>
+<div class="relative min-w-0 w-full" onfocusout={onWrapperFocusOut}>
   <input
     class="input-base pr-7"
     type={keyId ? "text" : "password"}
@@ -65,9 +79,9 @@
     {placeholder}
     {title}
     bind:this={inputEl}
-    on:input={onInput}
-    on:focus={onFocus}
-    on:click={() => (open = true)}
+    oninput={onInput}
+    onfocus={onFocus}
+    onclick={() => (open = true)}
   />
   <ChevronDownIcon
     size="12"
@@ -86,7 +100,7 @@
           <button
             type="button"
             class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-300 transition-colors hover:bg-zinc-800"
-            on:click={() => selectKey(key)}
+            onclick={() => selectKey(key)}
           >
             <KeyIcon size="12" class="shrink-0 text-zinc-400" />
             <span class="min-w-0 flex-1 truncate">{key.name}</span>
