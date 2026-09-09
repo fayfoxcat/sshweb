@@ -6,7 +6,6 @@
  * only change their import source (from "svelte-feather-icons" to "$lib/icons").
  */
 import {
-  // Unchanged names (41).
   Archive,
   Book,
   Check,
@@ -14,7 +13,11 @@ import {
   ChevronRight,
   ChevronsDown,
   ChevronsUp,
+  CircleCheck,
+  CircleQuestionMark,
+  CircleX,
   Clipboard,
+  CloudUpload,
   Code,
   Copy,
   CornerUpLeft,
@@ -30,9 +33,11 @@ import {
   Inbox,
   Info,
   Key,
+  LayoutGrid,
   Link,
   Minus,
   Music,
+  Pen,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -43,19 +48,12 @@ import {
   Settings,
   Terminal,
   Trash,
+  TriangleAlert,
   Type,
   Upload,
   Video,
   X,
   Zap,
-  // Renamed by lucide v1 (7).
-  CircleCheck, // <- feather CheckCircle
-  CircleQuestionMark, // <- feather HelpCircle
-  CircleX, // <- feather XCircle
-  CloudUpload, // <- feather UploadCloud
-  LayoutGrid, // <- feather Grid
-  Pen, // <- feather Edit
-  TriangleAlert, // <- feather AlertTriangle
 } from "lucide-svelte";
 
 export {

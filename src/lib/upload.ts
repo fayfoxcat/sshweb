@@ -1,11 +1,6 @@
 import { get, writable } from "svelte/store";
 
-import {
-  UPLOAD_ACK_TIMEOUT_MS,
-  UPLOAD_CHUNK,
-  UPLOAD_MAX_RETRIES,
-  UPLOAD_TASKS_KEY,
-} from "./constants";
+import { UPLOAD_ACK_TIMEOUT_MS, UPLOAD_CHUNK, UPLOAD_MAX_RETRIES, UPLOAD_TASKS_KEY, } from "./constants";
 import { tr } from "./i18n";
 import { parentOf } from "./path";
 import type { WsClient, WsServer } from "./protocol";
