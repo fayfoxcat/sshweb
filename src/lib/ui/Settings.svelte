@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { createEventDispatcher } from "svelte";
+
   import { changeAccessPassword } from "$lib/auth";
   import { lang, setLang, t, type Lang } from "$lib/i18n";
   import { settings, updateSettings } from "$lib/settings";
@@ -16,28 +18,39 @@
     type SshKey,
   } from "$lib/keys";
 
-  export let open: boolean;
+  const dispatch = createEventDispatcher<{ close: void }>();
 
-  let inputTheme: ThemeName;
-  let inputScrollback: number;
-  let inputLang: Lang = $lang;
-  $: inputLang = $lang;
-
-  let initialized = false;
-  $: (open, (initialized = false));
-  $: if (!initialized) {
-    initialized = true;
-    inputTheme = $settings.theme;
-    inputScrollback = $settings.scrollback;
-    inputLang = $lang;
+  interface Props {
+    open: boolean;
   }
 
+  let { open }: Props = $props();
+
+  let inputTheme = $state<ThemeName>($settings.theme);
+  let inputScrollback = $state($settings.scrollback);
+  let inputLang = $state<Lang>($lang);
+
+  // Reset the draft inputs from the live settings each time the dialog opens
+  // (keys reload too, so keys generated elsewhere appear here).
+  let initDone = false;
+  $effect(() => {
+    if (open && !initDone) {
+      initDone = true;
+      inputTheme = $settings.theme;
+      inputScrollback = $settings.scrollback;
+      inputLang = $lang;
+      void loadKeys();
+    } else if (!open) {
+      initDone = false;
+    }
+  });
+
   // ---- Change access password -------------------------------------------
-  let curPassword = "";
-  let newPassword = "";
-  let confirmNewPassword = "";
-  let changeBusy = false;
-  let changeError = "";
+  let curPassword = $state("");
+  let newPassword = $state("");
+  let confirmNewPassword = $state("");
+  let changeBusy = $state(false);
+  let changeError = $state("");
 
   async function submitPasswordChange() {
     if (!curPassword) {
@@ -69,17 +82,17 @@
 
   // ---- SSH key management -------------------------------------------------
   /** Draft name for a new key (optional; blank generates an `ssh-…` name). */
-  let newKeyName = "";
+  let newKeyName = $state("");
   /** Key id currently being renamed inline (its name shown in an input). */
-  let renameKeyId: string | null = null;
-  let renameDraft = "";
+  let renameKeyId = $state<string | null>(null);
+  let renameDraft = $state("");
   /** Key id armed for inline delete confirmation (second click deletes). */
-  let deleteArmedId: string | null = null;
-  let keysBusy = false;
+  let deleteArmedId = $state<string | null>(null);
+  let keysBusy = $state(false);
 
-  // Refresh the saved-key list each time the settings dialog opens, so keys
-  // generated elsewhere (the server form) are reflected here.
-  $: if (open) void loadKeys();
+  function close() {
+    dispatch("close");
+  }
 
   function startRename(key: SshKey) {
     deleteArmedId = null;
@@ -153,7 +166,7 @@
   description={t($lang, "settings.description")}
   showCloseButton
   {open}
-  on:close
+  on:close={close}
 >
   <div class="flex flex-col gap-4">
     <div class="item">
@@ -165,7 +178,7 @@
         <select
           class="input-base w-52"
           bind:value={inputLang}
-          on:change={() => setLang(inputLang)}
+          onchange={() => setLang(inputLang)}
         >
           <option value="zh-CN">简体中文</option>
           <option value="en">English</option>
@@ -181,7 +194,7 @@
         <select
           class="input-base w-52"
           bind:value={inputTheme}
-          on:change={() => updateSettings({ theme: inputTheme })}
+          onchange={() => updateSettings({ theme: inputTheme })}
         >
           {#each Object.keys(themes) as themeName (themeName)}
             <option value={themeName}>{themeName}</option>
@@ -199,7 +212,7 @@
           type="number"
           class="input-base w-52"
           bind:value={inputScrollback}
-          on:input={() => {
+          oninput={() => {
             if (inputScrollback >= 0) {
               updateSettings({ scrollback: inputScrollback });
             }
@@ -252,7 +265,7 @@
         {/if}
         <button
           class="pw-btn"
-          on:click={submitPasswordChange}
+          onclick={submitPasswordChange}
           disabled={changeBusy}
           title={t($lang, "settings.chgPwd")}
         >
@@ -281,15 +294,15 @@
                   onEscape: cancelRename,
                   preventDefault: true,
                 }}
-                on:blur={() => {
+                onblur={() => {
                   if (renameKeyId === key.id) submitRename(key);
                 }}
               />
               <button
                 class="icon-btn shrink-0"
                 title={t($lang, "common.ok")}
-                on:mousedown|stopPropagation
-                on:click={() => submitRename(key)}
+                onmousedown={(e) => e.stopPropagation()}
+                onclick={() => submitRename(key)}
               >
                 <EditIcon size="14" />
               </button>
@@ -306,13 +319,13 @@
             {#if deleteArmedId === key.id}
               <button
                 class="shrink-0 rounded px-1.5 py-0.5 text-xs font-medium text-red-300 transition-colors hover:bg-red-900/50"
-                on:click={() => confirmDelete(key)}
+                onclick={() => confirmDelete(key)}
               >
                 {t($lang, "settings.confirmDeleteKey")}
               </button>
               <button
                 class="shrink-0 rounded px-1.5 py-0.5 text-xs text-zinc-400 transition-colors hover:bg-zinc-700"
-                on:click={() => (deleteArmedId = null)}
+                onclick={() => (deleteArmedId = null)}
               >
                 {t($lang, "common.cancel")}
               </button>
@@ -320,14 +333,14 @@
               <button
                 class="icon-btn shrink-0"
                 title={t($lang, "settings.renameKey")}
-                on:click={() => startRename(key)}
+                onclick={() => startRename(key)}
               >
                 <EditIcon size="14" />
               </button>
               <button
                 class="icon-btn shrink-0 hover:!text-red-400"
                 title={t($lang, "settings.deleteKey")}
-                on:click={() => armDelete(key)}
+                onclick={() => armDelete(key)}
               >
                 <TrashIcon size="14" />
               </button>
@@ -348,7 +361,7 @@
           />
           <button
             class="shrink-0 rounded-md bg-indigo-700 px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-50"
-            on:click={generateKey}
+            onclick={generateKey}
             disabled={keysBusy}
           >
             <PlusIcon size="13" class="inline -mt-0.5" />
