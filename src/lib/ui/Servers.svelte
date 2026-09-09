@@ -103,9 +103,9 @@
   /** 按下拉框宽度动态计算指纹可显示字符数。 */
   let keyFpMax = $derived(Math.max(8, Math.floor((keySelectWidth - 48) / 7)));
 
-  /** Read an input's current value for the descriptor-driven field grids
-   *  (replaces `bind:value`, which cannot combine with a dynamic `type`).
-   *  Number fields keep a numeric value. */
+  /** 字段网格手动取值入口(见坑 43):runes 下 `bind:value` 已可与动态 `type` 同用(编译无告警),
+   *  这里仍用 `value`+`oninput` 只为把 string→number 转换收口到本函数单点;
+   *  `spec.type === "number"` 返回 Number(value)(port 等 u16 字段),勿混用 bind:value 丢转换。 */
   function inputValue(event: Event, spec: FieldSpec): string | number {
     const value = (event.currentTarget as HTMLInputElement).value;
     return spec.type === "number" ? Number(value) : value;
