@@ -21,14 +21,10 @@
   <div
     class="fixed inset-x-0 top-14 z-[70] pointer-events-none flex justify-end p-4"
   >
-    <div class="w-full max-w-md">
+    <div class="w-full max-w-md" role="status" aria-live="polite">
       {#each $toastStore.slice().reverse() as toast (toast)}
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class="mb-2"
-          on:click={() =>
-            ($toastStore = $toastStore.filter((t) => t !== toast))}
-          on:keypress={() => null}
           animate:flip={{ duration: 500 }}
           transition:fly={{ x: 360, duration: 500 }}
         >
@@ -37,6 +33,8 @@
             message={toast.message}
             action={toast.action}
             on:action={toast.onAction ?? (() => null)}
+            on:dismiss={() =>
+              ($toastStore = $toastStore.filter((t) => t !== toast))}
           />
         </div>
       {/each}
