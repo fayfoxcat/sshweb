@@ -226,7 +226,13 @@
         <p class="item-title">{t($lang, "settings.chgPwd")}</p>
         <p class="item-subtitle">{t($lang, "settings.chgPwdHint")}</p>
       </div>
-      <div class="flex w-full flex-col gap-2 sm:w-64">
+      <form
+        class="flex w-full flex-col gap-2 sm:w-64"
+        onsubmit={(event) => {
+          event.preventDefault();
+          void submitPasswordChange();
+        }}
+      >
         <input
           type="password"
           class="input-base w-52"
@@ -265,7 +271,7 @@
         {/if}
         <button
           class="pw-btn"
-          onclick={submitPasswordChange}
+          type="submit"
           disabled={changeBusy}
           title={t($lang, "settings.chgPwd")}
         >
@@ -273,7 +279,7 @@
             ? t($lang, "settings.changing")
             : t($lang, "settings.changeBtn")}
         </button>
-      </div>
+      </form>
     </div>
     <div class="item">
       <div>

@@ -679,7 +679,13 @@
   open={formOpen}
   on:close={cancelForm}
 >
-  <div class="flex flex-col gap-4">
+  <form
+    class="flex flex-col gap-4"
+    onsubmit={(event) => {
+      event.preventDefault();
+      void submitForm();
+    }}
+  >
     <div class="section">
       <div class="grid grid-cols-3 gap-3">
         {#each BASIC_FIELDS as f (f.labelKey)}
@@ -750,18 +756,21 @@
               </select>
             </label>
             <button
+              type="button"
               class="btn-mini"
               onclick={copyPublicKey}
               title={t($lang, "servers.copyPubkey")}
               >{t($lang, "servers.copyPubkey")}</button
             >
             <button
+              type="button"
               class="btn-mini"
               onclick={() => (keyNameOpen = true)}
               title={t($lang, "servers.genKey")}
               >{t($lang, "servers.genKey")}</button
             >
             <button
+              type="button"
               class="btn-mini"
               onclick={startInstall}
               title={t($lang, "servers.installKey")}
@@ -841,6 +850,7 @@
           <p class="section-desc">{t($lang, "servers.chainDesc")}</p>
         </div>
         <button
+          type="button"
           class="btn-secondary"
           onclick={() =>
             (form.hosts = [
@@ -884,6 +894,7 @@
               />
             </div>
             <button
+              type="button"
               class="icon-btn-sm shrink-0 text-red-400"
               onclick={() =>
                 (form.hosts = form.hosts.filter((_, j) => j !== i))}
@@ -991,10 +1002,11 @@
     </div>
 
     <div class="flex justify-end gap-2">
-      <button class="btn-secondary" onclick={cancelForm}
+      <button type="button" class="btn-secondary" onclick={cancelForm}
         >{t($lang, "common.cancel")}</button
       >
       <button
+        type="button"
         class="btn-test"
         onclick={testConnection}
         disabled={testing}
@@ -1002,11 +1014,11 @@
       >
         {testing ? t($lang, "servers.testing") : t($lang, "servers.test")}
       </button>
-      <button class="btn-primary" onclick={submitForm}>
+      <button type="submit" class="btn-primary">
         {editing ? t($lang, "common.save") : t($lang, "servers.addBtn")}
       </button>
     </div>
-  </div>
+  </form>
 
   <!-- Prompt dialogs are kept here (inside the OverlayMenu) for co-location. -->
   <PromptDialog

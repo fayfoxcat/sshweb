@@ -3,7 +3,6 @@
 
   import DialogShell from "./DialogShell.svelte";
   import Dialog from "./Dialog.svelte";
-  import { enterEscape } from "./shortcuts";
   import { tr } from "$lib/i18n";
 
   const dispatch = createEventDispatcher<{
@@ -61,20 +60,30 @@
     onConfirm={confirm}
     onCancel={cancel}
   >
-    {#if label}
-      <label for="prompt-input" class="mt-3 block text-sm text-zinc-300"
-        >{label}</label
-      >
-    {/if}
-    <input
-      id="prompt-input"
-      bind:this={inputEl}
-      class="mt-2 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-500/50"
-      {type}
-      {value}
-      oninput={(event) => (value = event.currentTarget.value)}
-      {placeholder}
-      use:enterEscape={{ onEnter: confirm, preventDefault: true }}
-    />
+    <!-- A real <form> so password prompts are contained in a form (no Chromium
+         "Password field is not contained in a form" console warning). Enter
+         submits natively (implicit submission); Escape is handled globally by
+         Dialog's window keydown. -->
+    <form
+      onsubmit={(event) => {
+        event.preventDefault();
+        confirm();
+      }}
+    >
+      {#if label}
+        <label for="prompt-input" class="mt-3 block text-sm text-zinc-300"
+          >{label}</label
+        >
+      {/if}
+      <input
+        id="prompt-input"
+        bind:this={inputEl}
+        class="mt-2 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-500/50"
+        {type}
+        {value}
+        oninput={(event) => (value = event.currentTarget.value)}
+        {placeholder}
+      />
+    </form>
   </DialogShell>
 </Dialog>
