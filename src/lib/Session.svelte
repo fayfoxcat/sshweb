@@ -144,7 +144,7 @@
     },
   });
   const rtState = rt.state;
-  $: ({ shells, activeId, baseTitles, shellServers, headlessShells } =
+  $: ({ shells, activeId, baseTitles, numbers, shellServers, headlessShells } =
     $rtState);
 
   // ---- File editor (multi-tab) ------------------------------------------
@@ -321,6 +321,10 @@
       )
       .sort(([a], [b]) => a - b);
     if (same.length === 1) return base;
+    // Use the number frozen at creation (so closing a shell never renumbers
+    // the rest); fall back to the live rank only if it is missing.
+    const n = numbers[shellId];
+    if (n) return `${base} ${n}`;
     const idx = same.findIndex(([sid]) => sid === shellId) + 1;
     return `${base} ${idx}`;
   }

@@ -19,6 +19,9 @@ type ShellRuntimeState = {
   activeId: number;
   /** Base display name (without dedup suffix) for each shell. */
   baseTitles: Record<number, string>;
+  /** Frozen per-shell disambiguator among same-base shells (assigned at
+   *  creation; closing another shell never renumbers the rest). */
+  numbers: Record<number, number>;
   /** Server config used by each shell ("open SSH in directory" identity). */
   shellServers: Record<number, WsServerConfig | null>;
   /** Headless SFTP shells (no terminal tab) keyed by sid. */
@@ -33,6 +36,7 @@ const initial = (): ShellRuntimeState => ({
   shells: [],
   activeId: -1,
   baseTitles: {},
+  numbers: {},
   shellServers: {},
   headlessShells: {},
   pendingNames: [],
@@ -296,11 +300,23 @@ export function createSessionRuntime(env: RuntimeEnv) {
       state.update((s) => {
         const baseTitles = { ...s.baseTitles };
         const shellServers = { ...s.shellServers };
+        const numbers = { ...s.numbers };
         const pendingNames = [...s.pendingNames];
         const pendingServers = [...s.pendingServers];
+        const defaultTitle = tr("session.tabDefault");
         for (const shellId of added) {
-          baseTitles[shellId] =
-            pendingNames.shift() ?? tr("session.tabDefault");
+          const base = pendingNames.shift() ?? defaultTitle;
+          baseTitles[shellId] = base;
+          // Freeze a per-shell number at creation: the highest number already
+          // used by a same-base open shell (incl. shells added earlier in this
+          // batch) + 1. Closing another shell therefore never renumbers.
+          let maxNo = 0;
+          for (const [id] of shells) {
+            if ((baseTitles[id] ?? defaultTitle) === base) {
+              maxNo = Math.max(maxNo, numbers[id] ?? 0);
+            }
+          }
+          numbers[shellId] = maxNo + 1;
           const server = pendingServers.shift() ?? null;
           shellServers[shellId] = server;
           if (server) pendingConnects.set(shellId, server.name);
@@ -324,6 +340,7 @@ export function createSessionRuntime(env: RuntimeEnv) {
           shells,
           activeId,
           baseTitles,
+          numbers,
           shellServers,
           pendingNames,
           pendingServers,
