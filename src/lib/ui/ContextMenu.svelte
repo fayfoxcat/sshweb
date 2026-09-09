@@ -48,6 +48,7 @@
   }
 </script>
 
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   class="fixed z-[90] w-52 rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-xl"
   style:left={`${Math.min(x, window.innerWidth - 216)}px`}
@@ -55,6 +56,7 @@
   on:contextmenu|preventDefault
 >
   <!-- 新建 (flyout: 新建文件 / 新建文件夹) -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="relative"
     on:mouseenter={() => (newSubmenuOpen = true)}
@@ -72,6 +74,7 @@
       <ChevronRightIcon size="14" class="shrink-0 text-zinc-500" />
     </button>
     {#if newSubmenuOpen}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
         class="absolute left-full top-0 z-[95] w-44 rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-xl"
         on:mouseleave={() => (newSubmenuOpen = false)}
@@ -97,6 +100,7 @@
   </div>
   <div class="my-1 border-t border-zinc-800"></div>
   <!-- 上传 (flyout: 上传文件 / 上传文件夹) -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="relative"
     on:mouseenter={() => (uploadSubmenuOpen = true)}
@@ -114,6 +118,7 @@
       <ChevronRightIcon size="14" class="shrink-0 text-zinc-500" />
     </button>
     {#if uploadSubmenuOpen}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
         class="absolute left-full top-0 z-[95] w-48 rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-xl"
         on:mouseleave={() => (uploadSubmenuOpen = false)}

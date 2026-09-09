@@ -11,16 +11,6 @@ const config = {
     }),
   ],
 
-  // The app's interactive panels are custom DOM (terminal drop-zone, context
-  // menus, row dbl-click, drag handles…) that were never ARIA-role annotated;
-  // Svelte 5's a11y compiler diagnostics for those are filtered here (kept off
-  // for the rest) — real keyboard/a11y remediation is tracked separately.
-  compilerOptions: {
-    warningFilter(warning) {
-      return !warning.code.startsWith("a11y_");
-    },
-  },
-
   kit: {
     adapter: adapter({
       // `/` is prerendered to `index.html`; unknown-route SPA fallback is

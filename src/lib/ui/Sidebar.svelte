@@ -16,6 +16,7 @@
   $: dragging = $sidebarDragging;
 </script>
 
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <aside
   class="relative flex shrink-0 flex-col overflow-hidden border-r border-zinc-800 bg-zinc-900/60"
   style:width={widthCss}
@@ -28,6 +29,7 @@
 >
   <slot />
   {#if showHandle}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="absolute inset-y-0 right-0 w-1.5 cursor-col-resize hover:bg-indigo-500/40 active:bg-indigo-500/60"
       on:pointerdown={resize.onStart}

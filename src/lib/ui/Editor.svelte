@@ -422,6 +422,7 @@
     style:transform={`translate(${posX}px, ${posY}px)`}
   >
     <!-- Title bar (drag handle) -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="flex items-center gap-1.5 border-b border-zinc-800 bg-zinc-900 px-3 py-1.5"
       on:pointerdown={winDrag.onStart}
@@ -576,6 +577,7 @@
     </div>
 
     <!-- Resize handle -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="absolute bottom-0 right-0 h-5 w-5 cursor-nwse-resize"
       on:pointerdown={resizeDrag.onStart}

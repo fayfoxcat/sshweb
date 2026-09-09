@@ -556,6 +556,7 @@
        It cannot be edited, copied or removed. -->
   <div class="no-scrollbar flex-1 overflow-y-auto p-2">
     <div class="flex flex-col gap-2">
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
         class="flex items-center gap-2 rounded-md border border-emerald-900/40 bg-zinc-900 px-2.5 py-2"
         title={t($lang, "servers.localDesc")}
@@ -570,6 +571,7 @@
             {t($lang, "servers.localDesc")}
           </p>
         </div>
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class="flex shrink-0 items-center gap-0.5"
           on:dblclick|stopPropagation
@@ -598,6 +600,7 @@
       {:else}
         {#each $servers.servers as server (server.id)}
           {@const proxy = proxyOf(server)}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
             class="group flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900 px-2.5 py-2 transition-colors hover:bg-zinc-800 {$serversOver ===
             server.id
@@ -632,6 +635,7 @@
                 {serverTargetKey(server)}
               </p>
             </div>
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div
               class="flex shrink-0 items-center gap-0.5"
               on:dblclick|stopPropagation

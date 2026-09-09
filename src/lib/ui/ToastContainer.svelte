@@ -23,6 +23,7 @@
   >
     <div class="w-full max-w-md">
       {#each $toastStore.slice().reverse() as toast (toast)}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class="mb-2"
           on:click={() =>

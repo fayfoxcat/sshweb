@@ -75,6 +75,7 @@
     class="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500"
   />
   {#if open}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="no-scrollbar absolute left-0 right-0 top-full z-20 mt-1 max-h-48 overflow-y-auto rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-lg"
       on:mousedown|stopPropagation

@@ -24,10 +24,8 @@ module.exports = {
     },
   ],
   rules: {
-    // Svelte compiler diagnostics (incl. a11y_*) arrive here as a single rule;
-    // compile validation is done by `svelte-check`/build instead (its own
-    // warningFilter already drops the app's intentional a11y_* patterns).
-    "svelte/valid-compile": "off",
+    // Svelte compiler diagnostics (incl. the app's intentionally-ignored a11y_*
+    // patterns, each marked with a local `svelte-ignore` comment in the source).
     "@typescript-eslint/ban-ts-comment": "off",
     "@typescript-eslint/ban-types": "off",
     "@typescript-eslint/no-empty-function": "off",

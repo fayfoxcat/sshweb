@@ -30,6 +30,7 @@
     class="fixed inset-0 z-[80] flex items-center justify-center"
     use:enterEscape={{ onEscape: cancel }}
   >
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="absolute inset-0 bg-black/40"
       on:click={cancel}
