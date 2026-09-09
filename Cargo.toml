@@ -21,7 +21,7 @@ rand = "0.8.5"
 serde = { version = "1.0.188", features = ["derive", "rc"] }
 serde_json = "1.0.106"
 sshweb-core = { version = "0.4.1", path = "crates/sshweb-core" }
-tokio = { version = "1.40.0", features = ["full"] }
+tokio = { version = "1.40.0", features = ["rt-multi-thread", "macros", "net", "io-util", "fs", "time", "signal", "sync"] }
 tokio-stream = { version = "0.1.14", features = ["sync"] }
 tracing = "0.1.37"
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
@@ -32,3 +32,5 @@ strip = true
 opt-level = "z"
 lto = true
 codegen-units = 1
+# Single-process server: no unwinding needed, saves code size + improves perf.
+panic = "abort"

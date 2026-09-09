@@ -54,3 +54,8 @@ tracing-subscriber.workspace = true
 [target.'cfg(unix)'.dependencies]
 close_fds = "0.3.2"
 nix = { version = "0.27.1", features = ["fs", "ioctl", "process", "signal", "term"] }
+
+[dev-dependencies]
+# Test builds union features with [dependencies]: the trimmed set above plus
+# the test runtime/macros.
+tokio = { workspace = true, features = ["test-util"] }
