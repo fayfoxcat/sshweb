@@ -11,19 +11,29 @@
   import { languageForPath } from "$lib/editor/languages";
   import { applyDocChanges, type DiffStatus } from "$lib/editor/diff";
 
-  export let filePath = "";
-  export let lightMode = false;
-  /** Called on doc change with the current edited/dirty state. */
-  export let onEditedChange: (dirty: boolean) => void = () => {};
-  /** Called when the cursor moves. */
-  export let onCursorChange: (line: number, col: number) => void = () => {};
-  /** Called when the search/replace panel opens or closes (drives the
-   *  toolbar search button's active state). */
-  export let onSearchOpenChange: (open: boolean) => void = () => {};
+  interface Props {
+    filePath?: string;
+    lightMode?: boolean;
+    /** Called on doc change with the current edited/dirty state. */
+    onEditedChange?: (dirty: boolean) => void;
+    /** Called when the cursor moves. */
+    onCursorChange?: (line: number, col: number) => void;
+    /** Called when the search/replace panel opens or closes (drives the
+     *  toolbar search button's active state). */
+    onSearchOpenChange?: (open: boolean) => void;
+  }
+
+  let {
+    filePath = "",
+    lightMode = false,
+    onEditedChange = () => {},
+    onCursorChange = () => {},
+    onSearchOpenChange = () => {},
+  }: Props = $props();
 
   // CodeMirror internals.
   let view: any = null;
-  let containerEl: HTMLDivElement;
+  let containerEl = $state<HTMLDivElement>();
 
   /** Document text (also the pending doc until the view is created). */
   let docText = "";
@@ -364,7 +374,7 @@
       ],
     });
 
-    view = new EditorView({ state, parent: containerEl });
+    view = new EditorView({ state, parent: containerEl! });
 
     // Initial diff decorations (skipped in light mode).
     if (!lightMode) refreshDecorations();
