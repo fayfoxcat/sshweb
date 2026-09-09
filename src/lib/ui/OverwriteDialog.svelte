@@ -11,19 +11,24 @@
     cancel: void;
   }>();
 
-  export let open = false;
-  export let names: string[] = [];
-  export let title = "";
+  interface Props {
+    open?: boolean;
+    names?: string[];
+    title?: string;
+  }
+
+  let { open = false, names = [], title = "" }: Props = $props();
+
   /** Preview of the conflicting names (kept inside the component so the i18n
    *  separator / overflow suffix stay in one place). */
-  $: preview =
+  let preview = $derived(
     names.length <= 4
       ? names.join(t($lang, "file.zipSeparator"))
-      : `${names.slice(0, 4).join(t($lang, "file.zipSeparator"))}…`;
-  $: message = t($lang, "file.overwriteMessage", {
-    n: names.length,
-    names: preview,
-  });
+      : `${names.slice(0, 4).join(t($lang, "file.zipSeparator"))}…`,
+  );
+  let message = $derived(
+    t($lang, "file.overwriteMessage", { n: names.length, names: preview }),
+  );
 
   function overwrite() {
     open = false;
@@ -53,7 +58,7 @@
       style="border:0;padding:0"
       aria-label={t($lang, "common.close")}
       tabindex="-1"
-      on:click={cancel}>&#8203;</button
+      onclick={cancel}>&#8203;</button
     >
     <DialogShell
       {title}
