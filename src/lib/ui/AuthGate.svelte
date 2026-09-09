@@ -177,8 +177,8 @@
             {busy
               ? t($lang, "auth.processing")
               : $authStatus.setup
-              ? t($lang, "auth.login")
-              : t($lang, "auth.setupKeyBtn")}
+                ? t($lang, "auth.login")
+                : t($lang, "auth.setupKeyBtn")}
           </button>
         </form>
       {/if}

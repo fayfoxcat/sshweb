@@ -78,7 +78,7 @@ export function loadEditorState(): EditorsState | null {
     const active =
       parsed.active && open.includes(parsed.active)
         ? parsed.active
-        : open[open.length - 1] ?? null;
+        : (open[open.length - 1] ?? null);
     return {
       open,
       pathByKey,

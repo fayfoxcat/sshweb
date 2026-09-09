@@ -27,11 +27,13 @@ const en = {
   "auth.mismatch": "Passwords do not match.",
   "auth.errConnect": "Cannot reach the server",
   "auth.setupKeyTitle": "First login with the setup key",
-  "auth.setupKeyHint": "The one-time setup key was printed in the server log at first startup.",
+  "auth.setupKeyHint":
+    "The one-time setup key was printed in the server log at first startup.",
   "auth.setupKey": "Setup key",
   "auth.setupKeyBtn": "Sign in",
   "auth.forceTitle": "First login: set your access password",
-  "auth.forceHint": "Signed in with the setup key. Set a new page access password to continue.",
+  "auth.forceHint":
+    "Signed in with the setup key. Set a new page access password to continue.",
   "auth.forceBtn": "Set and continue",
 
   "settings.title": "Terminal settings",

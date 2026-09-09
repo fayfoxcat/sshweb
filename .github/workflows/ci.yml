@@ -80,7 +80,8 @@ jobs:
 
       # Static musl build — deployable to old-glibc machines (documented path).
       - name: Build static musl binary
-        run: cargo build --release --target x86_64-unknown-linux-musl --bin sshweb
+        run:
+          cargo build --release --target x86_64-unknown-linux-musl --bin sshweb
 
       - name: Stage release artifacts
         run: |

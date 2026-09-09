@@ -5,7 +5,12 @@ import { DEFAULT_SOCKS_PORT, DEFAULT_SSH_PORT } from "./constants";
 import { tr } from "./i18n";
 import { clearLegacyServers, readLegacyServers } from "./legacy";
 import { uuid } from "./uuid";
-import type { WsJumpHost, WsProxyConfig, WsServerConfig, WsSocks5Tunnel, } from "./protocol";
+import type {
+  WsJumpHost,
+  WsProxyConfig,
+  WsServerConfig,
+  WsSocks5Tunnel,
+} from "./protocol";
 
 /** A saved SSH configuration held in memory after server-side authentication.
  *  `WsServerConfig` already requires the base connection fields; only the

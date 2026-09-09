@@ -47,8 +47,7 @@ export async function copyText(text: string): Promise<boolean> {
  *  an empty read is a legitimate "nothing to paste", not an error), or why the
  *  read failed. */
 export type ClipboardRead =
-  | { ok: true; text: string }
-  | { ok: false; reason: "insecure" | "denied" };
+  { ok: true; text: string } | { ok: false; reason: "insecure" | "denied" };
 
 /** Read text from the OS clipboard.
  *

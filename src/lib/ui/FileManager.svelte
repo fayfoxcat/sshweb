@@ -1,11 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher, onMount } from "svelte";
-  import {
-    FolderIcon,
-    RefreshCwIcon,
-    SearchIcon,
-    XIcon,
-  } from "$lib/icons";
+  import { FolderIcon, RefreshCwIcon, SearchIcon, XIcon } from "$lib/icons";
 
   import type { WsClient, WsServer, WsSftpEntry } from "$lib/protocol";
   import { makeToast } from "$lib/toast";
@@ -147,7 +142,7 @@
   let currentKey: string | null = null;
   /** Server identity of the active terminal, derived from the `shellId` prop
    *  (null while no terminal is active). */
-  $: activeKey = shellId != null ? shellServerKeys[shellId] ?? null : null;
+  $: activeKey = shellId != null ? (shellServerKeys[shellId] ?? null) : null;
   /** Last observed active-server identity (the follow block writes it). */
   let prevActiveKey: string | null = null;
   /** Whether the file-manager panel was open on the previous reactive pass;

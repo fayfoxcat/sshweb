@@ -92,9 +92,8 @@ const extensions: LanguageEntry[] = [
     return nginx;
   }),
   streamLang(["properties", "conf", "config", "ini", "cfg"], async () => {
-    const { properties } = await import(
-      "@codemirror/legacy-modes/mode/properties"
-    );
+    const { properties } =
+      await import("@codemirror/legacy-modes/mode/properties");
     return properties;
   }),
   streamLang(["toml"], async () => {

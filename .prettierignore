@@ -1,0 +1,15 @@
+# Prettier 忽略项:node_modules/构建产物(等同 .gitignore)+ 有意保留手写格式的文档与样式。
+node_modules
+.svelte-kit
+build
+target
+package-lock.json
+*.log
+*.enc
+
+# 有意保持手写格式/便于审阅,不做 prettier 归一
+AGENTS.md
+README.md
+开发记录文档.md
+src/app.css
+src/app.html

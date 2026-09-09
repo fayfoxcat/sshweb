@@ -26,7 +26,8 @@ const zh = {
   "auth.mismatch": "两次输入的访问密码不一致。",
   "auth.errConnect": "无法连接服务端",
   "auth.setupKeyTitle": "首次登录:使用安装密钥",
-  "auth.setupKeyHint": "安装密钥已在服务首次启动时打印到服务端日志,请从日志中获取。",
+  "auth.setupKeyHint":
+    "安装密钥已在服务首次启动时打印到服务端日志,请从日志中获取。",
   "auth.setupKey": "安装密钥",
   "auth.setupKeyBtn": "登录",
   "auth.forceTitle": "首次登录:设置访问密码",
@@ -324,8 +325,7 @@ const zh = {
 
   // XTerm
   "xterm.fontError": "无法加载终端字体。",
-  "xterm.rightClickPasteDenied":
-    "浏览器未授予剪贴板读取权限，请按 Ctrl+V 粘贴",
+  "xterm.rightClickPasteDenied": "浏览器未授予剪贴板读取权限，请按 Ctrl+V 粘贴",
   "xterm.rightClickPasteInsecure":
     "当前页面是 HTTP 非本机访问(非安全上下文)，浏览器禁止网页读取剪贴板。请按 Ctrl+V 粘贴，或为本站启用 HTTPS。",
   // Http helper

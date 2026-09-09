@@ -20,8 +20,8 @@ export function enterEscape(
       event.key === "Enter"
         ? opts.onEnter
         : event.key === "Escape"
-        ? opts.onEscape
-        : undefined;
+          ? opts.onEscape
+          : undefined;
     if (!handler) return;
     if (opts.preventDefault) event.preventDefault();
     if (opts.stopPropagation) event.stopPropagation();

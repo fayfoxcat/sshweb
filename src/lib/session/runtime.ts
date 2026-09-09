@@ -3,7 +3,12 @@ import { get, writable } from "svelte/store";
 import { servers, serverTargetKey } from "../connections";
 import { tr } from "../i18n";
 import type { Toast } from "../toast";
-import type { WsClient, WsServer, WsServerConfig, WsWinsize, } from "../protocol";
+import type {
+  WsClient,
+  WsServer,
+  WsServerConfig,
+  WsWinsize,
+} from "../protocol";
 
 /** Terminal-tab registry state for one session (data only: the component
  *  keeps writers/locks/editor refs, which are DOM-bound). */
