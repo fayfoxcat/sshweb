@@ -32,8 +32,8 @@
             kind={toast.kind}
             message={toast.message}
             action={toast.action}
-            on:action={toast.onAction ?? (() => null)}
-            on:dismiss={() =>
+            onAction={toast.onAction ?? (() => null)}
+            onDismiss={() =>
               ($toastStore = $toastStore.filter((t) => t !== toast))}
           />
         </div>

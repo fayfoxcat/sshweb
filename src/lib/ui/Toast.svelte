@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { createEventDispatcher } from "svelte";
   import {
     CheckCircleIcon,
     HelpCircleIcon,
@@ -9,16 +8,24 @@
   } from "$lib/icons";
   import { tr } from "$lib/i18n";
 
-  const dispatch = createEventDispatcher<{ action: void; dismiss: void }>();
+  interface Props {
+    /** The kind of toast to display. */
+    kind?: "info" | "success" | "error";
+    /** The message to display inside the toast. */
+    message: string;
+    /** An optional action to provide as a button on the toast. */
+    action?: string;
+    onAction?: () => void;
+    onDismiss?: () => void;
+  }
 
-  /** The kind of toast to display. */
-  export let kind: "info" | "success" | "error" = "info";
-
-  /** The message to display inside the toast. */
-  export let message: string;
-
-  /** An optional action to provide as a button on the toast. */
-  export let action = "";
+  let {
+    kind = "info",
+    message,
+    action = "",
+    onAction = () => {},
+    onDismiss = () => {},
+  }: Props = $props();
 </script>
 
 <div class="toast-box">
@@ -40,7 +47,7 @@
     <button
       class="h-5 ml-3 shrink-0 px-2 flex items-center text-xs border rounded-md border-zinc-400 hover:border-zinc-200 hover:text-white transition-colors"
       type="button"
-      on:click={() => dispatch("action")}
+      onclick={onAction}
     >
       {action}
     </button>
@@ -53,7 +60,7 @@
     class="ml-3 shrink-0 rounded p-1 text-zinc-500 transition-colors hover:bg-zinc-700 hover:text-zinc-100"
     aria-label={tr("common.close")}
     title={tr("common.close")}
-    on:click={() => dispatch("dismiss")}
+    onclick={onDismiss}
   >
     <XIcon class="h-4 w-4" />
   </button>
