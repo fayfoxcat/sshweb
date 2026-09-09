@@ -62,6 +62,7 @@
     connectLocal: void;
     openLocalSftp: void;
   }>();
+
   /** Available MAC (message authentication code) algorithms. */
   const MAC_ALGORITHMS = [
     "hmac-sha2-512-etm",
@@ -75,33 +76,6 @@
 
   /** Available terminal encodings. */
   const ENCODINGS = TERMINAL_ENCODINGS;
-
-  /** 密钥下拉框可用宽度(经 `bind:clientWidth` 绑定),用于按宽度截断指纹。 */
-  let keySelectWidth = 0;
-  /** 按下拉框宽度动态计算指纹可显示字符数(扣除内边距与下拉箭头空间)。 */
-  $: keyFpMax = Math.max(8, Math.floor((keySelectWidth - 48) / 7));
-
-  /** Compact fingerprint for the key dropdown. A native `<select>` sizes its
-   *  open list to the widest option, so a full `SHA256:…` fingerprint would
-   *  widen the popup far past the box. Truncate to the space the closed box
-   *  actually has(`max` 来自 `keyFpMax`,按宽度测量)。 */
-  function shortFingerprint(fp: string, max: number): string {
-    return fp.length > max ? `${fp.slice(0, max)}…` : fp;
-  }
-
-  // Form dialog state for adding/editing a server.
-  let editing: ServerConfig | null = null;
-  let formOpen = false;
-  /** The add/edit form. Reuses `ServerInput` for the shared connection
-   *  fields (so a new persisted field cannot drift); the proxy is split into
-   *  an enabled flag plus one field per input and reassembled by
-   *  `buildInput()`. The `Record<string, any>` intersection lets the
-   *  descriptor-driven field grids index `form[spec.key]`. */
-  let form: ServerForm & Record<string, any> = blankForm();
-  let macMenuOpen = false;
-  let keyNameOpen = false;
-  let installPwdOpen = false;
-  let testing = false;
 
   /** Add/edit form state. The proxy / SOCKS5 tunnel objects are split into
    *  per-input fields (`ProxyFormFields` / `Socks5FormFields`) and reassembled
@@ -124,19 +98,36 @@
     select?: "auth" | "encoding" | "proxyKind";
   };
 
+  /** 密钥下拉框可用宽度(经 `bind:clientWidth` 绑定),用于按宽度截断指纹。 */
+  let keySelectWidth = $state(0);
+  /** 按下拉框宽度动态计算指纹可显示字符数。 */
+  let keyFpMax = $derived(Math.max(8, Math.floor((keySelectWidth - 48) / 7)));
+
   /** Read an input's current value for the descriptor-driven field grids
    *  (replaces `bind:value`, which cannot combine with a dynamic `type`).
-   *  Number fields keep a numeric value (Svelte's native `bind:value` coerces
-   *  `<input type="number">` to a number; without this the serialized
-   *  `port`/`proxyPort`/`socks5Port` would be strings and the server's
-   *  `u16` deserialization would reject the payload with 400). */
+   *  Number fields keep a numeric value. */
   function inputValue(event: Event, spec: FieldSpec): string | number {
     const value = (event.currentTarget as HTMLInputElement).value;
     return spec.type === "number" ? Number(value) : value;
   }
 
-  /** Basic connection fields (name/host/port + user/authMethod/encoding),
-   *  laid out as two 3-column rows. */
+  /** Compact fingerprint for the key dropdown. */
+  function shortFingerprint(fp: string, max: number): string {
+    return fp.length > max ? `${fp.slice(0, max)}…` : fp;
+  }
+
+  // Form dialog state for adding/editing a server.
+  let editing = $state<ServerConfig | null>(null);
+  let formOpen = $state(false);
+  /** The add/edit form. `Record<string, any>` intersection lets the
+   *  descriptor-driven field grids index `form[spec.key]`. */
+  let form = $state<ServerForm & Record<string, any>>(blankForm());
+  let macMenuOpen = $state(false);
+  let keyNameOpen = $state(false);
+  let installPwdOpen = $state(false);
+  let testing = $state(false);
+
+  /** Basic connection fields. */
   const BASIC_FIELDS: FieldSpec[] = [
     {
       key: "name",
@@ -156,7 +147,7 @@
     { select: "encoding", labelKey: "servers.labelEncoding" },
   ];
 
-  /** 连接代理 (出站) 字段:类型/主机/端口 + 用户名/密码。 */
+  /** 连接代理 (出站) 字段。 */
   const PROXY_FIELDS: FieldSpec[] = [
     { select: "proxyKind", labelKey: "servers.proxyType" },
     {
@@ -175,7 +166,7 @@
     { key: "proxyPass", labelKey: "servers.proxyPass", type: "password" },
   ];
 
-  /** SOCKS5 隧道 (入站) 字段:端口/用户名/密码。 */
+  /** SOCKS5 隧道 (入站) 字段。 */
   const SOCKS5_FIELDS: FieldSpec[] = [
     {
       key: "socks5Port",
@@ -219,9 +210,7 @@
     formOpen = true;
   }
 
-  /** Validate the form's required connection fields; returns an error toast
-   *  message or `null` when valid. Shared by install / test / submit so the
-   *  host-user and key-required checks stay in one place. */
+  /** Validate the form's required connection fields. */
   function formError(): string | null {
     if (!form.host || !form.username) {
       return t($lang, "servers.errHostUser");
@@ -268,8 +257,7 @@
     }
   }
 
-  /** Collect the current form values into a server input (also used as the
-   *  wire format for the one-click install). */
+  /** Collect the current form values into a server input. */
   function buildInput(): ServerInput {
     return {
       name: form.name,
@@ -325,12 +313,7 @@
     }
   }
 
-  /** Install the selected key's public part onto the target server. The
-   *  connection reuses the form's CURRENT authentication — the selected saved
-   *  key (key mode) or the password — so any credential that can reach the
-   *  server works, regardless of which key is being installed. For password
-   *  mode `password` is merged in (the saved server password, or the one typed
-   *  in the prompt); key mode connects with the form's `keyId` directly. */
+  /** Install the selected key's public part onto the target server. */
   async function doInstall(password: string) {
     installPwdOpen = false;
     try {
@@ -345,8 +328,7 @@
     }
   }
 
-  /** Toast the form's validation error and report whether it is invalid.
-   *  Shared by install / test / submit so the guard stays in one place. */
+  /** Toast the form's validation error and report whether it is invalid. */
   function guardForm(): boolean {
     const error = formError();
     if (error) {
@@ -356,17 +338,10 @@
     return false;
   }
 
-  /** The effective SSH password: the form's value, falling back to the saved
-   *  server's when editing (a blank form password preserves the saved one).
-   *  Delegates to the shared rule in `connections.ts` (same as `updateServer`). */
   function resolvedPassword(): string {
     return effectivePassword(form.password, editing?.password ?? "");
   }
 
-  /** Toast "SSH 密码必填" and report whether a password-mode form is missing
-   *  one. Only used where a password is truly required (new-server submit and
-   *  connection tests); an edit may leave the field blank to keep the saved
-   *  password. */
   function guardPassword(): boolean {
     if (form.authMethod === "password" && !resolvedPassword()) {
       makeToast({ kind: "error", message: t($lang, "servers.errPassword") });
@@ -377,8 +352,6 @@
 
   function startInstall() {
     if (guardForm()) return;
-    // Key mode: connect with the currently selected saved key — no password
-    // needed to bootstrap the install.
     if (form.authMethod === "key") {
       doInstall("");
       return;
@@ -391,9 +364,6 @@
     }
   }
 
-  /** Test the current unsaved form values against the target server. When
-   *  editing and the password field is left blank, falls back to the saved
-   *  server's password (matching what a save would persist). */
   async function testConnection() {
     if (guardForm()) return;
     const cfg = buildInput();
@@ -440,7 +410,7 @@
     dispatch("openSftp", server.id);
   }
 
-  let deleteTarget: ServerConfig | null = null;
+  let deleteTarget = $state<ServerConfig | null>(null);
 
   function requestDelete(server: ServerConfig) {
     deleteTarget = server;
@@ -469,17 +439,14 @@
   }
 
   // ---- SOCKS5 隧道开关(列表快捷启停,运行时仅内存) ------------------------
-  /** 该服务器的隧道状态(运行中返回其端口)。 */
   function proxyOf(server: ServerConfig): ProxyStatus | undefined {
     return $proxies.find((p) => p.serverKey === serverTargetKey(server));
   }
 
-  /** 未配置过隧道端口(无 `socks5Tunnel`)的服务器:⚡ 按钮禁用。 */
   function proxyDisabled(server: ServerConfig): boolean {
     return !server.socks5Tunnel;
   }
 
-  /** 切换该服务器的 SOCKS5 隧道:已开启则停止,否则启动(配置页端口或自动分配)。 */
   async function toggleProxy(server: ServerConfig) {
     if (proxyDisabled(server)) return;
     const status = proxyOf(server);
@@ -498,7 +465,6 @@
     try {
       const started = await startProxy(
         toWsServerConfig(server),
-        // 配置页端口偏好(默认 1080);未配置则自动分配。
         server.socks5Tunnel?.port ?? DEFAULT_SOCKS_PORT,
       );
       makeToast({
@@ -513,7 +479,7 @@
     }
   }
 
-  // 面板每次打开时刷新隧道运行状态(开启/关闭只由列表 ⚡ 开关控制)。
+  // 面板每次打开时刷新隧道运行状态。
   onMount(() => {
     void loadProxies().catch(() => {});
   });
@@ -545,22 +511,21 @@
     >
     <button
       class="icon-btn"
-      on:click={startAdd}
+      onclick={startAdd}
       title={t($lang, "servers.addTitle")}
     >
       <PlusIcon size="16" />
     </button>
   </div>
 
-  <!-- Server list: first entry is always the machine sshweb-server runs on.
-       It cannot be edited, copied or removed. -->
+  <!-- Server list -->
   <div class="no-scrollbar flex-1 overflow-y-auto p-2">
     <div class="flex flex-col gap-2">
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
         class="flex items-center gap-2 rounded-md border border-emerald-900/40 bg-zinc-900 px-2.5 py-2"
         title={t($lang, "servers.localDesc")}
-        on:dblclick={() => dispatch("connectLocal")}
+        ondblclick={() => dispatch("connectLocal")}
       >
         <HardDriveIcon size="16" class="shrink-0 text-zinc-400" />
         <div class="min-w-0 flex-1">
@@ -574,19 +539,19 @@
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class="flex shrink-0 items-center gap-0.5"
-          on:dblclick|stopPropagation
+          ondblclick={(event) => event.stopPropagation()}
         >
           <button
             class="icon-btn-sm text-sky-400 hover:bg-sky-900/40"
             title={t($lang, "servers.newLocal")}
-            on:click={() => dispatch("connectLocal")}
+            onclick={() => dispatch("connectLocal")}
           >
             <TerminalIcon size="14" />
           </button>
           <button
             class="icon-btn-sm text-yellow-400 hover:bg-yellow-900/40"
             title={t($lang, "servers.openLocal")}
-            on:click={() => dispatch("openLocalSftp")}
+            onclick={() => dispatch("openLocalSftp")}
           >
             <FolderIcon size="14" />
           </button>
@@ -615,7 +580,7 @@
               },
               onDragLeave: serversDragLeave,
             }}
-            on:dblclick={() => connectTo(server)}
+            ondblclick={() => connectTo(server)}
           >
             <span
               draggable="true"
@@ -640,38 +605,37 @@
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div
               class="flex shrink-0 items-center gap-0.5"
-              on:dblclick|stopPropagation
+              ondblclick={(event) => event.stopPropagation()}
             >
               <button
                 class="icon-btn-sm text-sky-400 hover:bg-sky-900/40"
                 title={t($lang, "servers.connect")}
-                on:click={() => connectTo(server)}
+                onclick={() => connectTo(server)}
               >
                 <TerminalIcon size="14" />
               </button>
               <button
                 class="icon-btn-sm text-yellow-400 hover:bg-yellow-900/40"
                 title={t($lang, "servers.ftp")}
-                on:click={() => browseSftp(server)}
+                onclick={() => browseSftp(server)}
               >
                 <FolderIcon size="14" />
               </button>
               <button
                 class="icon-btn-sm"
                 title={t($lang, "servers.edit")}
-                on:click={() => startEdit(server)}
+                onclick={() => startEdit(server)}
               >
                 <EditIcon size="14" />
               </button>
               <button
                 class="icon-btn-sm"
                 title={t($lang, "servers.copy")}
-                on:click={() => copyServer(server)}
+                onclick={() => copyServer(server)}
               >
                 <CopyIcon size="14" />
               </button>
-              <!-- ⚡ 隧道开关:外层 span 保证 disabled 时悬停提示仍可见(浏览器
-                   不向 disabled 元素派发鼠标事件,title 不会显示)。 -->
+              <!-- ⚡ 隧道开关 -->
               <span
                 title={proxy
                   ? t($lang, "servers.socks5StopAt", { port: proxy.port })
@@ -687,7 +651,7 @@
                       ? '!text-emerald-300 !bg-emerald-900/40 hover:!bg-emerald-900/60'
                       : ''}"
                   disabled={proxyDisabled(server)}
-                  on:click={() => toggleProxy(server)}
+                  onclick={() => toggleProxy(server)}
                 >
                   <ZapIcon size="14" />
                 </button>
@@ -695,7 +659,7 @@
               <button
                 class="icon-btn-sm text-red-400 hover:bg-red-900/40"
                 title={t($lang, "servers.delete")}
-                on:click={() => requestDelete(server)}
+                onclick={() => requestDelete(server)}
               >
                 <TrashIcon size="14" />
               </button>
@@ -716,9 +680,7 @@
   on:close={cancelForm}
 >
   <div class="flex flex-col gap-4">
-    <!-- 基础连接信息(名称 ~ 密码/密钥) -->
     <div class="section">
-      <!-- 名称 / 主机 / 端口 + 用户名 / 认证方式 / 编码(两个 3 列行) -->
       <div class="grid grid-cols-3 gap-3">
         {#each BASIC_FIELDS as f (f.labelKey)}
           {@const key = f.key}
@@ -742,7 +704,7 @@
                 class="input-base"
                 type={f.type ?? "text"}
                 value={form[key]}
-                on:input={(e) => (form[key] = inputValue(e, f))}
+                oninput={(e) => (form[key] = inputValue(e, f))}
                 min={f.min}
                 max={f.max}
                 placeholder={f.placeholder ??
@@ -766,7 +728,7 @@
           />
         </label>
       {:else}
-        <!-- 密钥认证:复用已生成的服务器端密钥 -->
+        <!-- 密钥认证 -->
         <div class="flex flex-col gap-2">
           <div class="flex items-end gap-2">
             <label class="field min-w-0 flex-1">
@@ -789,19 +751,19 @@
             </label>
             <button
               class="btn-mini"
-              on:click={copyPublicKey}
+              onclick={copyPublicKey}
               title={t($lang, "servers.copyPubkey")}
               >{t($lang, "servers.copyPubkey")}</button
             >
             <button
               class="btn-mini"
-              on:click={() => (keyNameOpen = true)}
+              onclick={() => (keyNameOpen = true)}
               title={t($lang, "servers.genKey")}
               >{t($lang, "servers.genKey")}</button
             >
             <button
               class="btn-mini"
-              on:click={startInstall}
+              onclick={startInstall}
               title={t($lang, "servers.installKey")}
               >{t($lang, "servers.installKey")}</button
             >
@@ -813,7 +775,6 @@
       {/if}
     </div>
 
-    <!-- 启动目录(新建终端 / 首次打开 SFTP 的初始目录;留空 = SSH 用户主目录) -->
     <div class="section">
       <label class="field">
         <span>{t($lang, "servers.startupDirLabel")}</span>
@@ -826,19 +787,17 @@
       <p class="section-desc">{t($lang, "servers.startupDirDesc")}</p>
     </div>
 
-    <!-- 启动命令 (每行一条,终端启动后执行) -->
     <div class="section">
       <StartupSnippet bind:value={form.startup} />
     </div>
 
-    <!-- 校验算法 (MAC) - 下拉多选 -->
     <div class="section">
       <p class="section-title">{t($lang, "servers.mac")}</p>
       <div class="relative">
         <button
           type="button"
           class="input-base flex items-center pr-8"
-          on:click={() => (macMenuOpen = !macMenuOpen)}
+          onclick={() => (macMenuOpen = !macMenuOpen)}
         >
           <span class="min-w-0 flex-1 truncate">
             {form.macs.length === MAC_ALGORITHMS.length
@@ -864,7 +823,7 @@
                   type="checkbox"
                   class="accent-indigo-500"
                   checked={form.macs.includes(algo)}
-                  on:change={() => toggleMac(algo)}
+                  onchange={() => toggleMac(algo)}
                 />
                 <span class="truncate font-mono text-xs">{algo}</span>
               </label>
@@ -873,7 +832,8 @@
         {/if}
       </div>
     </div>
-    <!-- 主机链 (Host chaining / ProxyJump) -->
+
+    <!-- 主机链 -->
     <div class="section">
       <div class="flex items-center justify-between">
         <div>
@@ -882,7 +842,7 @@
         </div>
         <button
           class="btn-secondary"
-          on:click={() =>
+          onclick={() =>
             (form.hosts = [
               ...form.hosts,
               {
@@ -925,7 +885,7 @@
             </div>
             <button
               class="icon-btn-sm shrink-0 text-red-400"
-              on:click={() =>
+              onclick={() =>
                 (form.hosts = form.hosts.filter((_, j) => j !== i))}
               title={t($lang, "servers.chainRemove")}
             >
@@ -938,7 +898,7 @@
       {/if}
     </div>
 
-    <!-- 连接代理(出站:经代理连目标服务器) -->
+    <!-- 连接代理 -->
     <div class="section">
       <label class="flex items-center gap-2">
         <input
@@ -965,7 +925,7 @@
                   class="input-base"
                   type={f.type ?? "text"}
                   value={form[key]}
-                  on:input={(e) => (form[key] = inputValue(e, f))}
+                  oninput={(e) => (form[key] = inputValue(e, f))}
                   min={f.min}
                   max={f.max}
                   placeholder={f.placeholder ??
@@ -985,7 +945,7 @@
                   class="input-base"
                   type={f.type ?? "text"}
                   value={form[key]}
-                  on:input={(e) => (form[key] = inputValue(e, f))}
+                  oninput={(e) => (form[key] = inputValue(e, f))}
                 />
               {/if}
             </label>
@@ -994,7 +954,7 @@
       {/if}
     </div>
 
-    <!-- SOCKS5 隧道(入站:本机开放端口访问远程内网服务;勾选启用后由列表 ⚡ 开关控制) -->
+    <!-- SOCKS5 隧道 -->
     <div class="section">
       <label class="flex items-center gap-2">
         <input
@@ -1016,7 +976,7 @@
                   class="input-base"
                   type={f.type ?? "text"}
                   value={form[key]}
-                  on:input={(e) => (form[key] = inputValue(e, f))}
+                  oninput={(e) => (form[key] = inputValue(e, f))}
                   min={f.min}
                   max={f.max}
                   placeholder={f.placeholder ??
@@ -1031,27 +991,24 @@
     </div>
 
     <div class="flex justify-end gap-2">
-      <button class="btn-secondary" on:click={cancelForm}
+      <button class="btn-secondary" onclick={cancelForm}
         >{t($lang, "common.cancel")}</button
       >
       <button
         class="btn-test"
-        on:click={testConnection}
+        onclick={testConnection}
         disabled={testing}
         title={t($lang, "servers.test")}
       >
         {testing ? t($lang, "servers.testing") : t($lang, "servers.test")}
       </button>
-      <button class="btn-primary" on:click={submitForm}>
+      <button class="btn-primary" onclick={submitForm}>
         {editing ? t($lang, "common.save") : t($lang, "servers.addBtn")}
       </button>
     </div>
   </div>
 
-  <!-- Prompt dialogs are kept here (inside the OverlayMenu) for co-location.
-       Each Dialog portals to <body> and layers by z-index (OverlayMenu z-50,
-       prompts z-90), so a prompt always sits above the form regardless of
-       where it is written in the tree. -->
+  <!-- Prompt dialogs are kept here (inside the OverlayMenu) for co-location. -->
   <PromptDialog
     open={keyNameOpen}
     title={t($lang, "servers.keyNameTitle")}
@@ -1099,9 +1056,6 @@
   }
 
   .btn-mini {
-    /* py-2.5 makes the buttons the same height as a `.input-base` select
-       (text-sm 20px line-height): 2px border + 20px padding + 16px line-height
-       = 38px, matching 2px + 16px + 20px. */
     @apply inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-zinc-700 px-2 py-2.5 text-xs text-zinc-300 transition-colors hover:bg-zinc-700 hover:text-zinc-100;
   }
 
