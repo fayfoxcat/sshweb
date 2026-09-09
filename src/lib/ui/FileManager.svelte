@@ -31,7 +31,6 @@
   import { noop } from "./a11y";
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import PromptDialog from "./PromptDialog.svelte";
-  import OverwriteDialog from "./OverwriteDialog.svelte";
   import ContextMenu from "./ContextMenu.svelte";
   import UploadPanel from "./UploadPanel.svelte";
   import FileTooltip from "./FileTooltip.svelte";
@@ -430,6 +429,24 @@
     targetDir: string;
     conflicts: string[];
   } | null>(null);
+  /** Overwrite-conflict preview + message (single call site; kept here so the
+   *  i18n separator / overflow suffix stay in one place). */
+  let overwriteNames = $derived(
+    (overwriteDialog?.conflicts ?? []).map((p) => basename(p)),
+  );
+  let overwritePreview = $derived(
+    overwriteNames.length <= 4
+      ? overwriteNames.join(t($lang, "file.zipSeparator"))
+      : `${overwriteNames.slice(0, 4).join(t($lang, "file.zipSeparator"))}…`,
+  );
+  let overwriteMessage = $derived(
+    overwriteNames.length > 0
+      ? t($lang, "file.overwriteMessage", {
+          n: overwriteNames.length,
+          names: overwritePreview,
+        })
+      : "",
+  );
   let pendingList: {
     path: string;
     resolve: (entries: WsSftpEntry[]) => void;
@@ -1308,17 +1325,19 @@
   on:cancel={() => (promptDialog = null)}
 />
 
-<OverwriteDialog
+<ConfirmDialog
   open={overwriteDialog !== null}
-  names={overwriteDialog?.conflicts.map((p) => basename(p)) ?? []}
   title={t($lang, "file.overwriteTitle")}
-  on:overwrite={() => {
+  message={overwriteMessage}
+  middleText={t($lang, "file.skipBtn")}
+  confirmText={t($lang, "file.overwriteBtn")}
+  on:confirm={() => {
     if (overwriteDialog && clipboard) {
       doPaste(overwriteDialog.targetDir, clipboard.paths);
     }
     overwriteDialog = null;
   }}
-  on:skip={() => {
+  on:middle={() => {
     if (overwriteDialog && clipboard) {
       const skip = new Set(overwriteDialog.conflicts);
       doPaste(
