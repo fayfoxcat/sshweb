@@ -670,16 +670,16 @@
                 title={proxy
                   ? t($lang, "servers.socks5StopAt", { port: proxy.port })
                   : proxyDisabled(server)
-                  ? t($lang, "servers.socks5NeedConfig")
-                  : t($lang, "servers.socks5Start")}
+                    ? t($lang, "servers.socks5NeedConfig")
+                    : t($lang, "servers.socks5Start")}
                 class="inline-flex"
               >
                 <button
                   class="icon-btn-sm {proxyDisabled(server)
                     ? 'cursor-not-allowed opacity-40'
                     : proxy
-                    ? '!text-emerald-300 !bg-emerald-900/40 hover:!bg-emerald-900/60'
-                    : ''}"
+                      ? '!text-emerald-300 !bg-emerald-900/40 hover:!bg-emerald-900/60'
+                      : ''}"
                   disabled={proxyDisabled(server)}
                   on:click={() => toggleProxy(server)}
                 >
@@ -838,8 +838,8 @@
             {form.macs.length === MAC_ALGORITHMS.length
               ? t($lang, "servers.macAll")
               : form.macs.length === 0
-              ? t($lang, "servers.macDefault")
-              : t($lang, "servers.macSelected", { n: form.macs.length })}
+                ? t($lang, "servers.macDefault")
+                : t($lang, "servers.macSelected", { n: form.macs.length })}
           </span>
         </button>
         <ChevronDownIcon
@@ -1042,10 +1042,10 @@
     </div>
   </div>
 
-  <!-- The prompt dialogs must live INSIDE the OverlayMenu dialog so their
-       headlessui StackContextProvider chains into the form's dialog stack.
-       Rendered as a sibling, clicking their input would look like an
-       "outside click" to the form dialog, which closes itself. -->
+  <!-- Prompt dialogs are kept here (inside the OverlayMenu) for co-location.
+       Each Dialog portals to <body> and layers by z-index (OverlayMenu z-50,
+       prompts z-90), so a prompt always sits above the form regardless of
+       where it is written in the tree. -->
   <PromptDialog
     open={keyNameOpen}
     title={t($lang, "servers.keyNameTitle")}
