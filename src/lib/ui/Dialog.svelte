@@ -1,22 +1,31 @@
 <script lang="ts">
   import { fade, scale } from "svelte/transition";
+  import type { Snippet } from "svelte";
 
   import Portal from "./Portal.svelte";
 
-  /** Whether the dialog is shown. When false nothing is rendered. */
-  export let open = false;
-  /** Called on close (Esc, backdrop click). Consumers also wire their own
-   *  close buttons to this. */
-  export let onClose: () => void = () => {};
-  /** Stacking order. Layered dialogs (e.g. a prompt above the server form)
-   *  pass a higher z than the dialog beneath them — this replaces the old
-   *  headlessui dialog-stack context with plain z-index ordering. */
-  export let z = 50;
-  /** Width/layout classes for the panel wrapper (defaults full width; consumers
-   *  pass e.g. `sm:w-[calc(100%-32px)]`). */
-  export let panelClass = "w-full";
-  /** Inline style for the panel wrapper (e.g. a pixel `max-width`). */
-  export let panelStyle = "";
+  interface Props {
+    /** Whether the dialog is shown. When false nothing is rendered. */
+    open?: boolean;
+    /** Called on close (Esc, backdrop click). */
+    onClose?: () => void;
+    /** Stacking order (replaces the old headlessui dialog-stack context). */
+    z?: number;
+    /** Width/layout classes for the panel wrapper. */
+    panelClass?: string;
+    /** Inline style for the panel wrapper (e.g. pixel max-width). */
+    panelStyle?: string;
+    children?: Snippet;
+  }
+
+  let {
+    open = false,
+    onClose = () => {},
+    z = 50,
+    panelClass = "w-full",
+    panelStyle = "",
+    children,
+  }: Props = $props();
 
   function keydown(event: KeyboardEvent) {
     if (open && event.key === "Escape") {
@@ -26,7 +35,7 @@
   }
 </script>
 
-<svelte:window on:keydown={keydown} />
+<svelte:window onkeydown={keydown} />
 
 {#if open}
   <Portal>
@@ -43,7 +52,7 @@
         style="border:0;padding:0"
         aria-label="关闭"
         tabindex="-1"
-        on:click={onClose}
+        onclick={onClose}
         transition:fade={{ duration: 150 }}>&#8203;</button
       >
       <div
@@ -53,7 +62,7 @@
         aria-modal="true"
         transition:scale={{ start: 0.95, duration: 150 }}
       >
-        <slot />
+        {@render children?.()}
       </div>
     </div>
   </Portal>
