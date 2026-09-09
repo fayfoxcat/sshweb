@@ -599,7 +599,9 @@
         </div>
       {:else}
         {#each $servers.servers as server (server.id)}
-          {@const proxy = proxyOf(server)}
+          {@const proxy = $proxies.find(
+            (p) => p.serverKey === serverTargetKey(server),
+          )}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
             class="group flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900 px-2.5 py-2 transition-colors hover:bg-zinc-800 {$serversOver ===
