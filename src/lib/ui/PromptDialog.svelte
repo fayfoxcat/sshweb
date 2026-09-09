@@ -80,6 +80,7 @@
         bind:this={inputEl}
         class="mt-2 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-500/50"
         {type}
+        autocomplete={type === "password" ? "off" : undefined}
         {value}
         oninput={(event) => (value = event.currentTarget.value)}
         {placeholder}

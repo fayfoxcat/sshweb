@@ -727,6 +727,7 @@
           <input
             class="input-base"
             type="password"
+            autocomplete="off"
             bind:value={form.password}
             placeholder={editing
               ? t($lang, "servers.keepPwd")
@@ -955,6 +956,7 @@
                 <input
                   class="input-base"
                   type={f.type ?? "text"}
+                  autocomplete={f.type === "password" ? "off" : undefined}
                   value={form[key]}
                   oninput={(e) => (form[key] = inputValue(e, f))}
                 />
@@ -986,6 +988,7 @@
                 <input
                   class="input-base"
                   type={f.type ?? "text"}
+                  autocomplete={f.type === "password" ? "off" : undefined}
                   value={form[key]}
                   oninput={(e) => (form[key] = inputValue(e, f))}
                   min={f.min}

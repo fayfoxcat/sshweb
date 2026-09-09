@@ -75,6 +75,7 @@
   <input
     class="input-base pr-7"
     type={keyId ? "text" : "password"}
+    autocomplete={keyId ? undefined : "off"}
     value={displayValue}
     {placeholder}
     {title}
