@@ -1,31 +1,44 @@
 <script lang="ts">
-  import { XIcon } from "$lib/icons";
+  import type { Snippet } from "svelte";
 
+  import { XIcon } from "$lib/icons";
   import { draggable, droppable } from "./dnd";
 
-  export let active = false;
-  export let title = "";
-  export let closeTitle = "";
-  export let onActivate: () => void;
-  export let onClose: () => void;
-  /** "terminal" tabs are larger with rounded-t styling and a close icon of
-   *  14px; "editor" tabs are compact (10px text, 11px icon). */
-  export let variant: "terminal" | "editor" = "terminal";
+  interface Props {
+    active?: boolean;
+    title?: string;
+    closeTitle?: string;
+    onActivate: () => void;
+    onClose: () => void;
+    /** "terminal" tabs are larger with rounded-t styling and a close icon of
+     *  14px; "editor" tabs are compact (10px text, 11px icon). */
+    variant?: "terminal" | "editor";
+    dragKey?: string | null;
+    onTabDragStart?: (key: string) => void;
+    onTabDragEnd?: () => void;
+    onTabDragOver?: (key: string) => boolean;
+    onTabDrop?: (key: string) => void;
+    onTabDragLeave?: () => void;
+    dragOver?: boolean;
+    children?: Snippet;
+  }
 
-  // ---- Drag-to-sort (terminal tabs) --------------------------------------
-  // When `dragKey` is set the whole tab (except the close button) is a drag
-  // handle and the tab is a drop target. `onTabDragOver(key)` decides whether
-  // a drop onto this tab is allowed; `onTabDrop(key)` performs the reorder.
-  // `dragOver` (the reorder-target highlight) is a prop driven by the parent's
-  // shared reorder-dnd state (`createReorderDnd`), so all tabs read one source.
-  export let dragKey: string | null = null;
-  export let onTabDragStart: (key: string) => void = () => {};
-  export let onTabDragEnd: () => void = () => {};
-  export let onTabDragOver: (key: string) => boolean = () => false;
-  export let onTabDrop: (key: string) => void = () => {};
-  export let onTabDragLeave: () => void = () => {};
-  /** Highlight while another tab is dragged over this one (reorder target). */
-  export let dragOver = false;
+  let {
+    active = false,
+    title = "",
+    closeTitle = "",
+    onActivate,
+    onClose,
+    variant = "terminal",
+    dragKey = null,
+    onTabDragStart = () => {},
+    onTabDragEnd = () => {},
+    onTabDragOver = () => false,
+    onTabDrop = () => {},
+    onTabDragLeave = () => {},
+    dragOver = false,
+    children,
+  }: Props = $props();
 
   /** Whether a drag started on the close button (which must not drag the tab). */
   function onCloseButton(event: DragEvent): boolean {
@@ -55,8 +68,8 @@
   aria-selected={active}
   draggable={dragKey !== null}
   tabindex={variant === "terminal" ? 0 : -1}
-  on:click={onActivate}
-  on:keydown={(event) => {
+  onclick={onActivate}
+  onkeydown={(event) => {
     if (
       variant === "terminal" &&
       (event.key === "Enter" || event.key === " ")
@@ -89,10 +102,10 @@
     },
   }}
 >
-  <slot />
+  {@render children?.()}
   <button
     class="rounded p-0.5 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-200"
-    on:click={(event) => {
+    onclick={(event) => {
       event.stopPropagation();
       onClose();
     }}

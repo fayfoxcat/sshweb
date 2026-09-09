@@ -8,17 +8,21 @@
     formatClock,
   } from "$lib/format";
 
-  export let stats: StatsData | null = null;
+  interface Props {
+    stats?: StatsData | null;
+  }
 
-  $: cpu = stats?.cpu ?? 0;
-  $: memory = stats?.memory ?? 0;
-  $: up = stats?.up ?? 0;
-  $: down = stats?.down ?? 0;
-  $: time = stats?.time ?? 0;
+  let { stats = null }: Props = $props();
+
+  let cpu = $derived(stats?.cpu ?? 0);
+  let memory = $derived(stats?.memory ?? 0);
+  let up = $derived(stats?.up ?? 0);
+  let down = $derived(stats?.down ?? 0);
+  let time = $derived(stats?.time ?? 0);
 
   /** Format the server time, splitting date and clock into two lines. */
-  $: dateText = time > 0 ? formatDate(time) : "----:--:--";
-  $: clockText = time > 0 ? formatClock(time) : "--:--:--";
+  let dateText = $derived(time > 0 ? formatDate(time) : "----:--:--");
+  let clockText = $derived(time > 0 ? formatClock(time) : "--:--:--");
 </script>
 
 <div class="flex items-center gap-[4.8px] select-none">
