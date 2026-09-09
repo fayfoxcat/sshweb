@@ -10,9 +10,11 @@
   import { lang, t } from "$lib/i18n";
   import { cancelUploadTask, clearUploadTasks, uploadTasks } from "$lib/upload";
 
-  let panelOpen = false;
+  let panelOpen = $state(false);
 
-  $: runningCount = $uploadTasks.filter((t) => t.status === "running").length;
+  let runningCount = $derived(
+    $uploadTasks.filter((task) => task.status === "running").length,
+  );
 
   /** Upload progress clamped to [0, 100] (no-op for indeterminate tasks). */
   function progressPct(task: { done: number; total: number }): number {
@@ -38,14 +40,14 @@
             {#if $uploadTasks.some((task) => task.status !== "running")}
               <button
                 class="rounded px-2 py-1 text-[11px] text-zinc-400 transition-colors hover:bg-zinc-700 hover:text-zinc-200"
-                on:click={clearUploadTasks}
+                onclick={clearUploadTasks}
                 title={t($lang, "file.tasksClear")}
                 >{t($lang, "file.tasksClear")}</button
               >
             {/if}
             <button
               class="rounded p-1 text-zinc-400 transition-colors hover:bg-zinc-700 hover:text-zinc-200"
-              on:click={() => (panelOpen = false)}
+              onclick={() => (panelOpen = false)}
               title={t($lang, "file.tasksCollapse")}
             >
               <XIcon size="14" />
@@ -76,7 +78,7 @@
                 {/if}
                 <button
                   class="shrink-0 rounded p-0.5 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-200"
-                  on:click={() => cancelUploadTask(task.id)}
+                  onclick={() => cancelUploadTask(task.id)}
                   title={t($lang, "file.tasksRemove")}
                 >
                   <XIcon size="11" />
@@ -108,7 +110,7 @@
     {/if}
     <button
       class="relative flex h-11 w-11 items-center justify-center rounded-full border border-zinc-700 bg-zinc-900/95 shadow-lg transition-colors hover:bg-zinc-800"
-      on:click={() => (panelOpen = !panelOpen)}
+      onclick={() => (panelOpen = !panelOpen)}
       title={t($lang, "file.tasksTitle")}
     >
       <InboxIcon size="18" class="text-zinc-300" />

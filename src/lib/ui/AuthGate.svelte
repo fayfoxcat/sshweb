@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import type { Snippet } from "svelte";
 
   import {
     authStatus,
@@ -9,11 +10,17 @@
   } from "$lib/auth";
   import { lang, t } from "$lib/i18n";
 
-  let ready = false;
-  let busy = false;
-  let password = "";
-  let confirmation = "";
-  let error = "";
+  interface Props {
+    children?: Snippet;
+  }
+
+  let { children }: Props = $props();
+
+  let ready = $state(false);
+  let busy = $state(false);
+  let password = $state("");
+  let confirmation = $state("");
+  let error = $state("");
 
   onMount(async () => {
     try {
@@ -71,7 +78,7 @@
 </script>
 
 {#if ready && $authStatus.authenticated && !$authStatus.pendingChange}
-  <slot />
+  {@render children?.()}
 {:else}
   <main
     class="flex min-h-screen items-center justify-center bg-zinc-950 px-4 text-zinc-100"
@@ -93,7 +100,10 @@
         </div>
         <form
           class="flex flex-col gap-4"
-          on:submit|preventDefault={submitForceChange}
+          onsubmit={(event) => {
+            event.preventDefault();
+            submitForceChange();
+          }}
         >
           <label class="field">
             <span>{t($lang, "auth.password")}</span>
@@ -141,7 +151,10 @@
         </div>
         <form
           class="flex flex-col gap-4"
-          on:submit|preventDefault={submitLogin}
+          onsubmit={(event) => {
+            event.preventDefault();
+            submitLogin();
+          }}
         >
           <!-- Hidden username field: Chromium warns about password-only forms
                  with no username input for accessibility. -->
