@@ -11,22 +11,36 @@
     cancel: void;
   }>();
 
-  export let open = false;
-  export let title = tr("common.confirm");
-  export let message = "";
-  export let label = "";
-  export let value = "";
-  export let confirmText = tr("common.ok");
-  export let placeholder = "";
-  export let type: "text" | "password" = "text";
+  interface Props {
+    open?: boolean;
+    title?: string;
+    message?: string;
+    label?: string;
+    value?: string;
+    confirmText?: string;
+    placeholder?: string;
+    type?: "text" | "password";
+  }
+
+  let {
+    open = false,
+    title = tr("common.confirm"),
+    message = "",
+    label = "",
+    value = $bindable(""),
+    confirmText = tr("common.ok"),
+    placeholder = "",
+    type = "text",
+  }: Props = $props();
 
   let inputEl: HTMLInputElement;
 
-  /** Focus the input as soon as the dialog opens (the previous headlessui
-   *  FocusTrap is gone, so focus is set explicitly). */
-  $: if (open) {
-    tick().then(() => inputEl?.focus());
-  }
+  /** Focus the input as soon as the dialog opens. */
+  $effect(() => {
+    if (open) {
+      tick().then(() => inputEl?.focus());
+    }
+  });
 
   function cancel() {
     open = false;
@@ -58,7 +72,7 @@
       class="mt-2 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-500/50"
       {type}
       {value}
-      on:input={(event) => (value = event.currentTarget.value)}
+      oninput={(event) => (value = event.currentTarget.value)}
       {placeholder}
       use:enterEscape={{ onEnter: confirm, preventDefault: true }}
     />

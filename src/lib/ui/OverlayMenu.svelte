@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
+  import type { Snippet } from "svelte";
 
   import { XIcon } from "$lib/icons";
   import { lang, t } from "$lib/i18n";
@@ -7,11 +8,23 @@
 
   const dispatch = createEventDispatcher<{ close: void }>();
 
-  export let title: string;
-  export let description = "";
-  export let showCloseButton = false;
-  export let maxWidth: number = 768; // screen-md
-  export let open: boolean;
+  interface Props {
+    title: string;
+    description?: string;
+    showCloseButton?: boolean;
+    maxWidth?: number;
+    open: boolean;
+    children?: Snippet;
+  }
+
+  let {
+    title,
+    description = "",
+    showCloseButton = false,
+    maxWidth = 768,
+    open,
+    children,
+  }: Props = $props();
 
   function close() {
     dispatch("close");
@@ -32,7 +45,7 @@
       <button
         class="absolute top-4 right-4 p-1 rounded hover:bg-zinc-700 active:bg-indigo-700 transition-colors"
         aria-label={t($lang, "common.close")}
-        on:click={close}
+        onclick={close}
       >
         <XIcon class="h-5 w-5" />
       </button>
@@ -45,7 +58,7 @@
       {/if}
     </div>
 
-    <slot />
+    {@render children?.()}
   </div>
 </Dialog>
 
