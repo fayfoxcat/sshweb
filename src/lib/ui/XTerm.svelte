@@ -56,15 +56,16 @@
     rows: number;
     cols: number;
     /** Bound by the parent: the shell's chunk writer. */
-    write?: (data: string) => void;
-    /** Whether this terminal is the visible tab. */
+    write?: (
+      data: string,
+    ) => void; /** Whether this terminal is the visible tab. */
     active: boolean;
   }
 
   let {
     rows,
     cols,
-    write = $bindable<(data: string) => void>(() => {}),
+    write = $bindable<(data: string) => void>(),
     active,
   }: Props = $props();
 

@@ -17,7 +17,7 @@
   let {
     keys = [],
     password = $bindable(""),
-    keyId = $bindable<string | null | undefined>(null),
+    keyId = $bindable<string | null | undefined>(),
     placeholder = "",
   }: Props = $props();
 
