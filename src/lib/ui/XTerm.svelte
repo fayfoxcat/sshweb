@@ -130,7 +130,20 @@
   onMount(() => {
     const onResize = debounce(() => fit(), 150);
     window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    // The pane also changes size with no window resize involved: the editor tab
+    // bar appears/leaves below the terminal, and the SFTP sidebar is dragged
+    // wider or narrower. xterm would keep its old row/column count in that
+    // case, and because the pane clips (`overflow-hidden`) the bottom rows —
+    // the prompt, i.e. whatever is being typed — end up hidden behind the tab
+    // bar. Observing the element itself covers every container-driven change.
+    // Only the active shell's fit reaches the server (`handleResize`), so
+    // refitting the hidden terminals too is harmless.
+    const observer = new ResizeObserver(onResize);
+    observer.observe(element!);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      observer.disconnect();
+    };
   });
 
   onDestroy(() => term?.dispose());

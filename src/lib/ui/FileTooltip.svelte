@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { WsSftpEntry } from "$lib/protocol";
-  import { formatDateTime, formatSize } from "$lib/format";
+  import { formatDateTime, formatMode, formatSize } from "$lib/format";
   import { lang, t } from "$lib/i18n";
 
   interface Props {
@@ -18,6 +18,9 @@
   style:top={`${y}px`}
 >
   <p class="mb-1 font-medium">{entry.name}</p>
+  <p class="text-zinc-400">
+    {t($lang, "file.hoverMode")}：{formatMode(entry.mode)}
+  </p>
   <p class="text-zinc-400">
     {t($lang, "file.hoverModified")}：{formatDateTime(entry.modified)}
   </p>

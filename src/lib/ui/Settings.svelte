@@ -379,7 +379,7 @@
   </div>
 
   <p class="mt-6 text-sm text-right text-zinc-400">
-    <a target="_blank" rel="noreferrer" href="https://github.com/ekzhang/sshx"
+    <a target="_blank" rel="noreferrer" href="https://github.com/fayfoxcat/sshweb"
       >sshweb v{__APP_VERSION__}</a
     >
   </p>

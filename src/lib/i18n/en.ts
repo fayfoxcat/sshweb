@@ -109,6 +109,7 @@ const en = {
   "file.upDir": "Parent directory (double-click to go up, drop to move)",
   "file.hoverModified": "Modified",
   "file.hoverCreated": "Created",
+  "file.hoverMode": "Permissions",
   "file.hoverSize": "Size",
   "file.menuNew": "New",
   "file.menuNewFile": "New file",

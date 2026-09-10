@@ -332,6 +332,17 @@
     selected = new Set(names.slice(lo, hi + 1));
   }
 
+  /** Clear the selection when the click lands on empty list space (anywhere
+   *  that is not a row). Rows match `[role="option"]`, so their own handlers
+   *  are unaffected — this only fills the gap they leave. */
+  function onListClick(event: MouseEvent) {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('[role="option"]')) return;
+    if (selected.size === 0) return;
+    selected = new Set();
+    anchorName = null;
+  }
+
   let focusIndex = $state(-1);
   let listEl = $state<HTMLDivElement>();
 
@@ -1128,13 +1139,14 @@
 
   <!-- File list -->
   <div
-    class="no-scrollbar flex-1 overflow-y-auto outline-none transition-opacity duration-150"
+    class="fm-list no-scrollbar flex-1 overflow-y-auto outline-none transition-opacity duration-150"
     class:opacity-60={loading}
     bind:this={listEl}
     tabindex="0"
     role="listbox"
     aria-label={t($lang, "file.list")}
     onkeydown={onKeydown}
+    onclick={onListClick}
     onmousedown={onMouseNav}
     onmouseup={onMouseNav}
     onauxclick={onMouseNav}
@@ -1248,11 +1260,15 @@
           </span>
         {/if}
 
-        <span class="w-16 shrink-0 ml-1.5 font-mono text-[10px] text-zinc-600">
+        <span
+          class="fm-mode w-16 shrink-0 ml-1.5 font-mono text-[10px] text-zinc-600"
+        >
           {formatMode(entry.mode)}
         </span>
 
-        <span class="w-20 shrink-0 text-right text-xs text-zinc-500">
+        <span
+          class="fm-size w-20 shrink-0 text-right text-xs text-zinc-500"
+        >
           {entry.isDir ? "" : formatSize(entry.size)}
         </span>
       </div>
@@ -1351,3 +1367,29 @@
 />
 
 <svelte:window onclick={closeCtxMenu} />
+
+<style lang="postcss">
+  /* The list — not the <aside> — carries the container: `container-type`
+     implies layout containment, which would make the sidebar the containing
+     block for the viewport-fixed FileTooltip rendered as its sibling. */
+  .fm-list {
+    container-type: inline-size;
+  }
+
+  /* Rows drop their fixed columns in reverse priority order as the sidebar
+     narrows, so the name — the only identifying column — always keeps room:
+     mode goes first (near-constant, and the icon already tells dir from file;
+     links are tinted), then size (still in the hover tooltip). Thresholds are
+     the widths at which the name would otherwise fall under ~110px. */
+  @container (max-width: 330px) {
+    .fm-mode {
+      display: none;
+    }
+  }
+
+  @container (max-width: 250px) {
+    .fm-size {
+      display: none;
+    }
+  }
+</style>

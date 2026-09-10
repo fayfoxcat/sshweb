@@ -111,6 +111,7 @@ const zh = {
   "file.upDir": "上级目录（双击返回，可拖入移动）",
   "file.hoverModified": "修改时间",
   "file.hoverCreated": "创建时间",
+  "file.hoverMode": "权限",
   "file.hoverSize": "大小",
   "file.menuNew": "新建",
   "file.menuNewFile": "新建文件",
