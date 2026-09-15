@@ -98,7 +98,13 @@ jobs:
       # A lightweight tag has no message: the body is then only the changelog
       # link GitHub generates.
       - name: Release notes from the tag annotation
-        run: git tag -l --format='%(contents)' "${GITHUB_REF_NAME}" > RELEASE_NOTES.md
+        run: |
+          # actions/checkout leaves a *lightweight* tag ref (it fetches the commit
+          # SHA, not the tag object), whose %(contents) is the commit message.
+          # Re-fetch the tag by name to get the annotated object.
+          git fetch --force --no-recurse-submodules origin \
+            "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          git tag -l --format='%(contents)' "${GITHUB_REF_NAME}" > RELEASE_NOTES.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
