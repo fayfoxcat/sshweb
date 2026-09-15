@@ -2784,7 +2784,7 @@ dependencies = [
 
 [[package]]
 name = "sshweb-core"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "rand 0.8.5",
  "serde",
@@ -2792,7 +2792,7 @@ dependencies = [
 
 [[package]]
 name = "sshweb-server"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "aes-gcm 0.10.3",
  "anyhow",

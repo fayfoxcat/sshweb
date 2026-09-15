@@ -93,10 +93,18 @@ jobs:
       - name: Smoke test static binary
         run: ./dist/sshweb-${GITHUB_REF_NAME}-x86_64-unknown-linux-musl version
 
+      # The release notes are the annotated tag's message (see 开发记录文档 §三
+      # 「发布流程」), so what a release says lives in the tag, not in this file.
+      # A lightweight tag has no message: the body is then only the changelog
+      # link GitHub generates.
+      - name: Release notes from the tag annotation
+        run: git tag -l --format='%(contents)' "${GITHUB_REF_NAME}" > RELEASE_NOTES.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
+          body_path: RELEASE_NOTES.md
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
