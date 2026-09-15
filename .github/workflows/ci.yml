@@ -120,6 +120,8 @@ jobs:
         with:
           files: dist/*
           body_path: RELEASE_NOTES.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # softprops does not refresh the body of a release that already exists
       # (re-pushing a tag updates assets only), so set it explicitly — this is
@@ -128,5 +130,3 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release edit "${GITHUB_REF_NAME}" --notes-file RELEASE_NOTES.md
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
