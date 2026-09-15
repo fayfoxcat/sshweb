@@ -9,7 +9,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use futures_util::StreamExt;
-use openssh_sftp_client::{fs::Fs, Sftp};
+use openssh_sftp_client::{file::File, fs::Fs, Sftp};
 
 use super::pool::{with_remote, SftpPool};
 use super::MAX_LIST_ENTRIES;
@@ -133,22 +133,80 @@ pub async fn write_at_remote(
             let mut fs = sftp.fs();
             if offset == 0 {
                 ensure_parent_remote(&mut fs, path).await?;
+                // Create/truncate first and **await** it: every write below
+                // opens without `truncate`, so a truncate landing after one of
+                // their writes would drop that data. Only this one open has to
+                // be ordered — the chunk's pieces are pipelined like any other
+                // chunk's.
+                let mut opts = sftp.options();
+                opts.write(true).create(true).truncate(true);
+                opts.open(path).await?.close().await?;
             }
-            let mut opts = sftp.options();
-            opts.write(true).create(true).truncate(offset == 0);
-            let mut file = opts.open(path).await?;
-            use tokio::io::AsyncSeekExt;
-            file.seek(std::io::SeekFrom::Start(offset))
-                .await
-                .map_err(openssh_sftp_client::error::Error::IOError)?;
-            file.write_all(data).await?;
-            file.close().await?;
+
+            // Write the chunk's pieces concurrently, each on its own handle.
+            // The crate waits for the reply of every request, so one handle
+            // costs one target round trip per ~256 KiB; several handles are
+            // multiplexed onto the same SFTP channel, which turns that into
+            // one round trip per *batch*. Over a jump host (tens of ms RTT)
+            // that is the difference between ~2.5 MB/s and scp-like throughput
+            // (已知坑 77).
+            let pieces: Vec<(usize, &[u8])> = data.chunks(PIECE_BYTES).enumerate().collect();
+            for wave in pieces.chunks(MAX_PARALLEL_WRITES) {
+                let writes = wave.iter().map(|(i, bytes)| {
+                    let at = offset + (*i * PIECE_BYTES) as u64;
+                    let sftp = &sftp;
+                    async move {
+                        // One handle per piece: `File::write` takes `&mut self`,
+                        // so concurrent writes need concurrent handles.
+                        let mut opts = sftp.options();
+                        opts.write(true).create(true).truncate(false);
+                        let mut file = opts.open(path).await?;
+                        let written = write_piece(&mut file, at, bytes).await;
+                        // Close even on the error path: dropping a `File` sends
+                        // no CLOSE request, so the handle would stay open on the
+                        // target until the whole channel goes away.
+                        let closed = file.close().await;
+                        written?;
+                        closed.map_err(anyhow::Error::from)?;
+                        Ok::<(), anyhow::Error>(())
+                    }
+                });
+                futures_util::future::try_join_all(writes).await?;
+            }
             Ok(())
         }
         .await;
         result
     })
     .await
+}
+
+/// How many SFTP write requests (and file handles) an upload chunk may have in
+/// flight at once. Bounded so a big chunk cannot open an unbounded number of
+/// handles on the target; 16 pieces cover a 4 MiB chunk (`UPLOAD_CHUNK`) in a
+/// single wave.
+const MAX_PARALLEL_WRITES: usize = 16;
+
+/// Bytes per pipelined write. Matches OpenSSH's advertised `max-write-length`
+/// (255 KiB) so one piece is normally one SFTP write request; a server
+/// advertising less simply splits a piece into more (still-pipelined)
+/// requests, since `openssh-sftp-client` clamps every write to the limit it
+/// negotiated.
+const PIECE_BYTES: usize = 256 * 1024;
+
+/// Seek to `offset` and write `data` on `file`.
+///
+/// `write_piece` deliberately does not close: the caller owns the handle, so
+/// it can still close it when this returns an error (`File` has no `Drop`, so
+/// a handle dropped unclosed is never released on the server until the whole
+/// channel goes away).
+async fn write_piece(file: &mut File, offset: u64, data: &[u8]) -> Result<()> {
+    use tokio::io::AsyncSeekExt;
+    file.seek(std::io::SeekFrom::Start(offset))
+        .await
+        .map_err(openssh_sftp_client::error::Error::IOError)?;
+    file.write_all(data).await?;
+    Ok(())
 }
 
 /// Ensure the parent directory chain of `path` exists on the remote server.

@@ -41,7 +41,12 @@ const TERMINAL_BUFFER_BYTES: usize = 1 << 20; // 1 MiB
 /// malicious client spamming `sftpWriteAt`/`sftpWrite` can no longer grow
 /// memory without bound; when the queue is full the write is rejected with an
 /// error instead of being silently dropped (known pitfall 19).
-const WRITE_QUEUE_CAP: usize = 256;
+///
+/// Counted in *ops*, so the memory bound is this times the client's chunk size
+/// (4 MiB, see `UPLOAD_CHUNK`): 64 keeps a fully flooded queue under a few
+/// hundred MB while leaving far more headroom than the client uses (it keeps
+/// one chunk in flight, so the queue depth is 1 or 2).
+const WRITE_QUEUE_CAP: usize = 64;
 /// Cap on the per-session set of paths with an in-flight chunked upload, used
 /// to refuse an editor save that would race the upload (see the write worker
 /// in [`Session::new`]). Past this many concurrent uploads the guard is

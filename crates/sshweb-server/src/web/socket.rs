@@ -17,8 +17,9 @@ use crate::web::protocol::{WsClient, WsServer};
 use crate::ServerState;
 
 /// Cap on a single inbound WebSocket message (安全审查 M4). Chunked uploads
-/// send 240 KiB slices; editor saves can be a few MB. 16 MiB bounds a
-/// malicious client from pushing multi-hundred-MB frames into the write queue.
+/// send 4 MiB slices (`UPLOAD_CHUNK`); editor saves can be a few MB. 16 MiB
+/// bounds a malicious client from pushing multi-hundred-MB frames into the
+/// write queue.
 const MAX_WS_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
 
 pub async fn get_session_ws(

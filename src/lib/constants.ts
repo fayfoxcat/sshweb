@@ -33,9 +33,19 @@ export const RECONNECT_DELAY_MS = 500;
 /** Number of messages to queue while the WebSocket is disconnected. */
 export const SROCKET_BUFFER_SIZE = 64;
 
-/** Chunk size for chunked SFTP uploads (bytes, see `sftpWriteAt`). Leaves room
- *  for the SFTP WRITE request header inside the 256 KiB packet limit. */
-export const UPLOAD_CHUNK = 240 * 1024;
+/** Chunk size for chunked SFTP uploads (bytes, see `sftpWriteAt`).
+ *
+ *  The server waits for a chunk's write to land on the target before it acks
+ *  it, and the browser keeps one chunk in flight, so the upload's throughput
+ *  is `chunk / round trip` — a small chunk makes it latency-bound. Over a jump
+ *  host (~20 ms RTT) 240 KiB measured 2.9 MiB/s and 4 MiB measured 7.0 MiB/s
+ *  (with the server pipelining the pieces internally, more). The SFTP request
+ *  size is unaffected: the server still splits a chunk into the server's
+ *  advertised per-request limit.
+ *
+ *  Kept well under the server's 16 MiB WebSocket message cap, and small enough
+ *  that a retry after a watchdog timeout does not re-send much. */
+export const UPLOAD_CHUNK = 4 * 1024 * 1024;
 
 /** Upload chunk-ack watchdog: if a chunk isn't acknowledged within this long
  *  (ms), it is retried — a dropped `sftpWriteOk` (the server's 512-bounded
