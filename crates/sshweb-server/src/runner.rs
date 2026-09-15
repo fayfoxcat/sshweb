@@ -116,22 +116,30 @@ pub async fn ssh_task(
     // paths are anchored the same way, so the remote login shell expands the
     // `~` to $HOME (a quoted `'~'` would not). Empty / `~` / `~/` mean home —
     // just exec, since the login shell already starts there.
+    //
+    // `exec … -l` keeps this branch's environment identical to `ssh host`:
+    // `request_shell` below is served by sshd's login shell, while a bare
+    // `exec ${SHELL}` is a **non-login** shell that skips `/etc/profile` and
+    // `/etc/profile.d/*.sh`. On Debian that is the difference between finding
+    // `/usr/lib/postgresql/*/bin` on `PATH` and having `psql` fall through to
+    // the `command-not-found` handler (which then crashes with its own
+    // traceback, hiding the real "command not found"). See 已知坑 58.
     match cwd.as_deref() {
         Some(cwd) if cwd != "~" && cwd != "~/" && !cwd.is_empty() => {
             let cmd = if let Some(rest) = cwd.strip_prefix("~/") {
                 format!(
-                    "cd ~/'{}' && exec ${{SHELL:-/bin/sh}}",
+                    "cd ~/'{}' && exec \"${{SHELL:-/bin/sh}}\" -l",
                     crate::utils::shell_quote(rest)
                 )
             } else if cwd.starts_with('/') {
                 format!(
-                    "cd '{}' && exec ${{SHELL:-/bin/sh}}",
+                    "cd '{}' && exec \"${{SHELL:-/bin/sh}}\" -l",
                     crate::utils::shell_quote(cwd)
                 )
             } else {
                 // Bare relative path (e.g. `project`): home-anchored like `~/…`.
                 format!(
-                    "cd ~/'{}' && exec ${{SHELL:-/bin/sh}}",
+                    "cd ~/'{}' && exec \"${{SHELL:-/bin/sh}}\" -l",
                     crate::utils::shell_quote(cwd)
                 )
             };

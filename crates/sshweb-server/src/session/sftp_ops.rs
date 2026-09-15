@@ -18,18 +18,40 @@ use crate::web::protocol::{ServerConfig, WsServer};
 /// session — see `Session::new`. The channel is **bounded** (`WRITE_QUEUE_CAP`,
 /// 已知坑 65 / 安全审查 M4): when full, a new write is rejected with a
 /// "写入队列已满" error rather than silently dropped or buffered without bound.
+///
+/// `Finish` / `Abort` share the same queue for the same reason as the writes
+/// themselves: they act on a file a `WriteAt` may still be filling, so they
+/// must not be able to overtake it (a delete racing ahead of a queued chunk
+/// would be undone by that chunk, leaving the partial file behind).
 pub(crate) enum WriteOp {
     /// Chunked upload write (`offset == 0` truncates/creates).
     WriteAt(Sid, String, u64, Bytes),
     /// Whole-file write (editor save / new-file creation).
     Write(Sid, String, Bytes),
+    /// The client finished a chunked upload of `total` bytes (verify + ack).
+    Finish(Sid, String, u64),
+    /// The client gave up on a chunked upload (delete the partial file).
+    Abort(Sid, String),
 }
 
 impl WriteOp {
     /// The affected path (used for per-path error reports).
     pub(crate) fn path(&self) -> &str {
         match self {
-            WriteOp::WriteAt(_, path, ..) | WriteOp::Write(_, path, _) => path,
+            WriteOp::WriteAt(_, path, ..)
+            | WriteOp::Write(_, path, _)
+            | WriteOp::Finish(_, path, _)
+            | WriteOp::Abort(_, path) => path,
+        }
+    }
+
+    /// The shell the operation applies to.
+    pub(crate) fn sid(&self) -> Sid {
+        match self {
+            WriteOp::WriteAt(id, ..)
+            | WriteOp::Write(id, ..)
+            | WriteOp::Finish(id, ..)
+            | WriteOp::Abort(id, _) => *id,
         }
     }
 }
@@ -488,7 +510,9 @@ impl Session {
             .is_err()
             && !self.write_queue.is_closed()
         {
-            self.error(format!("写入队列已满，请稍后再试（{path_for_err}）"));
+            self.error(format!(
+                "写入失败（{path_for_err}）：写入队列已满，请稍后再试"
+            ));
         }
     }
 
@@ -502,7 +526,36 @@ impl Session {
             .is_err()
             && !self.write_queue.is_closed()
         {
-            self.error(format!("写入队列已满，请稍后再试（{path_for_err}）"));
+            self.error(format!(
+                "写入失败（{path_for_err}）：写入队列已满，请稍后再试"
+            ));
+        }
+    }
+
+    /// Enqueue the "upload complete" verification for a chunked upload.
+    pub fn enqueue_upload_done(&self, id: Sid, path: String, total: u64) {
+        let path_for_err = path.clone();
+        if self
+            .write_queue
+            .try_send(WriteOp::Finish(id, path, total))
+            .is_err()
+            && !self.write_queue.is_closed()
+        {
+            self.error(format!(
+                "写入失败（{path_for_err}）：写入队列已满，请稍后再试"
+            ));
+        }
+    }
+
+    /// Enqueue the deletion of a partial upload the client gave up on.
+    pub fn enqueue_upload_abort(&self, id: Sid, path: String) {
+        let path_for_err = path.clone();
+        if self.write_queue.try_send(WriteOp::Abort(id, path)).is_err()
+            && !self.write_queue.is_closed()
+        {
+            self.error(format!(
+                "写入失败（{path_for_err}）：写入队列已满，请稍后再试"
+            ));
         }
     }
 
@@ -526,6 +579,78 @@ impl Session {
             Some(offset),
         )
         .await
+    }
+
+    /// Verify a finished chunked upload and acknowledge it.
+    ///
+    /// Every chunk of a `SftpWriteAt` stream is applied independently, so a
+    /// stream that ends early (dropped ack, lost connection, client that
+    /// counted acks instead of bytes) leaves a **short file under the final
+    /// name** with no write ever having failed. The only hard evidence that
+    /// the file is complete is its size on disk, so the client reports the
+    /// total it sent and this compares it against the real one.
+    ///
+    /// On mismatch the partial file is deleted (it is unusable — `pg_restore`
+    /// on such a dump fails with "could not read from input file: end of
+    /// file") and an error matching the client's `写入失败（path）：` channel
+    /// is reported, so no client ever sees a short file presented as a
+    /// success.
+    pub(crate) async fn sftp_upload_finish(&self, id: Sid, path: String, total: u64) -> Result<()> {
+        let stat_path = path.clone();
+        let actual = self
+            .run_path_ret(
+                id,
+                &stat_path,
+                "stat task",
+                move |pool, server, rp| async move { sftp::size_remote(&pool, &server, &rp).await },
+                move |lp| sftp::size_local(&lp),
+            )
+            .await?;
+        if actual != total {
+            let rm_path = path.clone();
+            if let Err(err) = self.remove_quiet(id, rm_path).await {
+                // A failed cleanup is worth a log but not a different error:
+                // the user must still learn the upload was incomplete.
+                tracing::warn!(%id, ?err, "failed to remove partial upload");
+            }
+            anyhow::bail!(
+                "上传大小不符（期望 {total} 字节，实际 {actual} 字节），已删除未完成的文件"
+            );
+        }
+        self.send(WsServer::SftpUploadOk(id, path, actual));
+        Ok(())
+    }
+
+    /// Delete a partial upload the client abandoned (see [`WriteOp::Abort`]).
+    ///
+    /// A missing file is not an error: the abort can arrive for an upload
+    /// whose first chunk never reached the disk. The `SftpOk` is sent anyway —
+    /// the client has already dropped the upload task, so it only serves as
+    /// the file manager's cue to refresh the listing.
+    pub(crate) async fn sftp_upload_abort(&self, id: Sid, path: String) -> Result<()> {
+        let rm_path = path.clone();
+        if let Err(err) = self.remove_quiet(id, rm_path).await {
+            tracing::debug!(%id, ?err, "upload abort: nothing removed");
+        }
+        self.send(WsServer::SftpOk(id, path));
+        Ok(())
+    }
+
+    /// Remove a file **without** acknowledging it, used where the caller sends
+    /// its own reply (partial-upload cleanup). Unlike [`Self::sftp_remove`]
+    /// this never emits an `SftpOk`, which would otherwise look like a fresh
+    /// operation ack to the client.
+    async fn remove_quiet(&self, id: Sid, path: String) -> Result<()> {
+        let rp = path.clone();
+        let lp = path;
+        self.run_target(
+            id,
+            move |pool, server| async move { sftp::remove_remote(&pool, &server, &rp, false).await },
+            move || sftp::remove_local(&lp, false),
+            "remove task",
+        )
+        .await
+        .map(|_| ())
     }
 
     /// Apply a whole-file write and notify the client on success.

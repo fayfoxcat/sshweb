@@ -168,6 +168,8 @@ const en = {
   "file.taskTimeout":
     "Timed out waiting for the server; retries exhausted. Re-upload to continue.",
   "file.taskReplaced": "Replaced by a newer upload of the same file.",
+  "file.taskVerify":
+    "Upload finished but the server's size check failed; the file was deleted. Re-upload to try again.",
   "file.toastClipCopied": "Copied to clipboard.",
   "file.toastClipCut": "Cut to clipboard.",
   "file.toastDeleted": "Deleted {name}.",

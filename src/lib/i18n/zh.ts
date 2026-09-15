@@ -168,6 +168,7 @@ const zh = {
   "file.taskInterrupted": "传输中断：页面已刷新，无法继续本次上传，请重新上传",
   "file.taskTimeout": "等待服务器确认超时，重试失败，请重新上传",
   "file.taskReplaced": "已被同路径的新上传任务取代",
+  "file.taskVerify": "上传完成但服务端校验未通过：文件已删除，请重新上传",
   "file.toastClipCopied": "已复制到剪贴板。",
   "file.toastClipCut": "已剪切到剪贴板。",
   "file.toastDeleted": "删除 {name} 成功",

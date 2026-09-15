@@ -42,6 +42,12 @@ const TERMINAL_BUFFER_BYTES: usize = 1 << 20; // 1 MiB
 /// memory without bound; when the queue is full the write is rejected with an
 /// error instead of being silently dropped (known pitfall 19).
 const WRITE_QUEUE_CAP: usize = 256;
+/// Cap on the per-session set of paths with an in-flight chunked upload, used
+/// to refuse an editor save that would race the upload (see the write worker
+/// in [`Session::new`]). Past this many concurrent uploads the guard is
+/// dropped rather than letting the bookkeeping grow without bound (安全审查
+/// M4).
+const MAX_TRACKED_UPLOADS: usize = 4096;
 /// Server-side cap on open shells per session (安全审查 M4). The frontend has
 /// its own lower `MAX_TERMINALS`; this is the hard limit so a malicious client
 /// cannot spawn unbounded local PTY processes.
@@ -313,15 +319,58 @@ impl Session {
         {
             let worker = Arc::clone(&session);
             tokio::spawn(async move {
+                // Paths with a chunked upload still in flight, per shell. An
+                // editor save for such a path is refused: the save truncates
+                // and rewrites the whole file while the upload is still
+                // seeking into it, which produces a file of the right length
+                // but with a hole (silent corruption). Only the worker touches
+                // this set, so it needs no lock.
+                let mut uploading: std::collections::HashSet<(Sid, String)> =
+                    std::collections::HashSet::new();
                 loop {
                     tokio::select! {
                         _ = worker.terminated() => break,
                         op = write_rx.recv() => {
                             let Some(op) = op else { break };
                             let path = op.path().to_string();
+                            let key = (op.sid(), path.clone());
+                            // `Finish`/`Abort` end an upload, so they release
+                            // the path before their own work runs.
+                            if matches!(op, WriteOp::Finish(..) | WriteOp::Abort(..)) {
+                                uploading.remove(&key);
+                            }
+                            if let WriteOp::WriteAt(_, _, 0, _) = &op {
+                                // 安全审查 M4: never grow without bound. Past
+                                // the cap the guard degrades (saves are
+                                // allowed) rather than the memory growing.
+                                if uploading.len() < MAX_TRACKED_UPLOADS {
+                                    uploading.insert(key.clone());
+                                }
+                            }
+                            // An editor save racing an upload of the same file
+                            // must not be applied: it rewrites the whole file
+                            // while the upload keeps seeking into it, leaving
+                            // the right length with a hole. Refused with its
+                            // own prefix ("保存失败", not "写入失败") so the
+                            // client's upload-error handler, which matches on
+                            // the path, does not abort the healthy upload.
+                            if let WriteOp::Write(id, path, _) = &op {
+                                if uploading.contains(&(*id, path.clone())) {
+                                    worker.error(format!(
+                                        "保存失败（{path}）：该文件正在上传中，请等上传完成后再保存"
+                                    ));
+                                    continue;
+                                }
+                            }
                             let result = match op {
                                 WriteOp::WriteAt(id, path, offset, data) => {
                                     worker.sftp_write_at_impl(id, path, offset, data).await
+                                }
+                                WriteOp::Finish(id, path, total) => {
+                                    worker.sftp_upload_finish(id, path, total).await
+                                }
+                                WriteOp::Abort(id, path) => {
+                                    worker.sftp_upload_abort(id, path).await
                                 }
                                 WriteOp::Write(id, path, data) => {
                                     worker.sftp_write(id, path, data).await

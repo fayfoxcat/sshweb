@@ -242,6 +242,17 @@ fn dispatch(session: &Arc<Session>, msg: WsClient) {
             // uploads, so save-vs-upload ordering is preserved.
             session.enqueue_write(id, path, data);
         }
+        WsClient::SftpUploadDone(id, path, total) => {
+            // Queue the size check after every chunk of this path, so the
+            // verification cannot run while a chunk is still being written.
+            session.enqueue_upload_done(id, path, total);
+        }
+        WsClient::SftpUploadAbort(id, path) => {
+            // Deleting a partial upload goes through the same queue: a chunk
+            // still queued for this path would otherwise be written *after*
+            // the delete, resurrecting the partial file.
+            session.enqueue_upload_abort(id, path);
+        }
         WsClient::SftpMkdir(id, path) => {
             spawn_op(session, "创建目录失败", move |s| async move {
                 s.sftp_mkdir(id, path).await?;

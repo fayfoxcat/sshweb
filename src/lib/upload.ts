@@ -37,8 +37,6 @@ type Upload = {
   targetDir: string;
   /** Total bytes to upload (the File's size at start). */
   total: number;
-  /** Number of distinct chunks (each acked offset counts once). */
-  expected: number;
   /** Number of distinct offsets acknowledged by the server. */
   done: number;
   /** Offset of the NEXT chunk to send. Advances only on ack, so a retry
@@ -48,6 +46,15 @@ type Upload = {
   inFlightOffset: number | null;
   /** Byte length of the in-flight chunk. */
   inFlightLength: number;
+  /** True once a chunk has been handed to the socket. Every chunk may have
+   *  been written even if its ack never arrived, so this — not `done` — is
+   *  what decides whether the server could be holding a partial file that a
+   *  failure must clean up. */
+  wroteAny: boolean;
+  /** True while the final `sftpUploadDone` awaits the server's size check
+   *  (`sftpUploadOk`). No chunk is in flight then, so the watchdog has to
+   *  retry the completion message instead of a chunk. */
+  verifying: boolean;
   /** Offsets already acknowledged by the server. A retried chunk can be
    *  written twice (the original write happened but its ack was dropped, or a
    *  delayed ack surfaces after the retry), so acks are deduplicated by
@@ -191,10 +198,28 @@ function updateTask(id: number, patch: Partial<UploadTask>) {
   persistTasks();
 }
 
-/** Drop an in-flight upload from the map and mark its task failed. */
-function failTask(upload: Upload, error: string) {
+/** Ask the server to delete a partial upload, but only once at least one chunk
+ *  was handed to the socket. Before that the path may hold the user's
+ *  pre-existing file, which no chunk has touched — deleting it would be a
+ *  destructive surprise. (The abort travels the same ordered WebSocket as the
+ *  chunks, so if it arrives, the chunks did too.) */
+function sendAbort(upload: Upload) {
+  if (!upload.wroteAny) return;
+  upload.targetSocket.send({
+    sftpUploadAbort: [upload.targetShell, upload.targetPath],
+  });
+}
+
+/** Drop an in-flight upload from the map and mark its task failed. When the
+ *  upload had already sent bytes, the server is asked to delete the partial
+ *  file (`sftpUploadAbort`, queued behind every chunk sent so far): a
+ *  half-written file left under the final name looks like a good file until
+ *  something reads it — `pg_restore` reports exactly that as
+ *  "could not read from input file: end of file". */
+function failTask(upload: Upload, error: string, abort = true) {
   uploads.delete(uploadKey(upload.targetShell, upload.targetPath));
   clearWatchdog(upload);
+  if (abort) sendAbort(upload);
   updateTask(upload.taskId, { status: "error", error });
 }
 
@@ -209,10 +234,10 @@ export function cancelUploadTask(id: number) {
     // FileReader's onload guards against this too).
     uploads.delete(uploadKey(running.targetShell, running.targetPath));
     clearWatchdog(running);
-    // Delete the partial file on the server so nothing is left behind.
-    running.targetSocket.send({
-      sftpRemove: [running.targetShell, running.targetPath, false],
-    });
+    // Delete the partial file on the server. The abort shares the server's
+    // per-session write FIFO with the chunks, so it cannot be overtaken by a
+    // chunk that is still in flight (which would recreate the file).
+    sendAbort(running);
   }
   uploadTasks.update((tasks) => tasks.filter((t) => t.id !== id));
   persistTasks();
@@ -248,6 +273,18 @@ function clearWatchdog(upload: Upload) {
 function onChunkTimeout(upload: Upload) {
   if (uploads.get(uploadKey(upload.targetShell, upload.targetPath)) !== upload)
     return;
+  if (upload.verifying) {
+    // The completion message (or its size-check reply) was lost — resend it.
+    // Re-verifying an already-verified upload is harmless: the size still
+    // matches, so the server answers `sftpUploadOk` again.
+    upload.retries += 1;
+    if (upload.retries > UPLOAD_MAX_RETRIES) {
+      failTask(upload, tr("file.taskTimeout"));
+      return;
+    }
+    sendUploadDone(upload);
+    return;
+  }
   if (upload.inFlightOffset === null) return;
   upload.retries += 1;
   if (upload.retries > UPLOAD_MAX_RETRIES) {
@@ -283,12 +320,28 @@ function onChunkTimeout(upload: Upload) {
   reader.readAsArrayBuffer(upload.file.slice(chunkOffset, end));
 }
 
+/** Send the completion message for an upload whose last byte was acked and
+ *  wait for the server's size check. Acknowledged chunks only prove that each
+ *  chunk's write returned — not that the file on disk holds every byte — so
+ *  the upload is finished by the server's verification, never by the ack
+ *  count. */
+function sendUploadDone(upload: Upload) {
+  upload.verifying = true;
+  upload.inFlightOffset = null;
+  upload.inFlightLength = 0;
+  upload.targetSocket.send({
+    sftpUploadDone: [upload.targetShell, upload.targetPath, upload.total],
+  });
+  armWatchdog(upload);
+}
+
 /** Send exactly one chunk. The next chunk is sent only after the server
  *  acknowledges this one, so progress reflects bytes actually written. */
 function sendNextChunk(upload: Upload) {
   if (uploads.get(uploadKey(upload.targetShell, upload.targetPath)) !== upload)
     return;
   if (upload.inFlightOffset !== null) return; // a chunk is in flight
+  if (upload.verifying) return; // awaiting the completion check
   // Empty files still need one offset-0 write so the server creates them.
   if (upload.started && upload.nextOffset >= upload.total) return;
 
@@ -309,6 +362,9 @@ function sendNextChunk(upload: Upload) {
     upload.inFlightOffset = chunkOffset;
     upload.inFlightLength = data.length;
     upload.retries = 0;
+    // From here on the server may hold part of this file, so a later failure
+    // must clean it up (see `failTask`).
+    upload.wroteAny = true;
     upload.targetSocket.send({
       sftpWriteAt: [upload.targetShell, upload.targetPath, chunkOffset, data],
     });
@@ -347,10 +403,13 @@ export function startUpload(opts: {
   } = opts;
   const key = uploadKey(targetShell, destPath);
   // Re-uploading the same path on the same shell supersedes the previous
-  // attempt; orphan it so its task doesn't hang in "running".
+  // attempt; orphan it so its task doesn't hang in "running". No abort is
+  // sent: this upload starts with a truncating offset-0 chunk, so the old
+  // partial file is overwritten — and an abort queued behind that chunk would
+  // delete the *new* file instead.
   const prev = uploads.get(key);
   if (prev) {
-    failTask(prev, tr("file.taskReplaced"));
+    failTask(prev, tr("file.taskReplaced"), false);
   }
   // Show the target identity (user@host) in the transfer panel so it's
   // clear which user the file is uploaded as.
@@ -358,7 +417,6 @@ export function startUpload(opts: {
     name: targetName ? `${targetName} · ${displayName}` : displayName,
     total: file.size,
   });
-  const expected = Math.max(1, Math.ceil(file.size / UPLOAD_CHUNK));
   const uploadState: Upload = {
     taskId: task.id,
     file,
@@ -368,11 +426,12 @@ export function startUpload(opts: {
     targetPath: destPath,
     targetDir: parentOf(destPath),
     total: file.size,
-    expected,
     done: 0,
     nextOffset: 0,
     inFlightOffset: null,
     inFlightLength: 0,
+    wroteAny: false,
+    verifying: false,
     ackedOffsets: new Set(),
     started: false,
     watchdog: null,
@@ -394,6 +453,10 @@ export function onUploadAck(
 ): boolean {
   const up = uploads.get(uploadKey(savedShell, savedPath));
   if (!up) return false;
+  // An ack for a finished upload (or one interleaved with the completion
+  // check) is not a chunk ack — there is no chunk in flight to associate it
+  // with, and the offset echo is what keeps a bare `sftpOk` honest.
+  if (up.verifying) return false;
   // Which offset this ack refers to: the echo when available, otherwise the
   // current in-flight chunk (backward-compatible with the old `sftpOk`).
   const ackedOffset = offset ?? up.inFlightOffset;
@@ -407,40 +470,65 @@ export function onUploadAck(
   up.inFlightOffset = null;
   up.inFlightLength = 0;
   updateTask(up.taskId, { done: up.nextOffset });
-  if (up.done >= up.expected) {
-    uploads.delete(uploadKey(savedShell, savedPath));
-    updateTask(up.taskId, { status: "done" });
-    // Report each completed upload once, by its display name and the target
-    // directory — so a terminal drop that went to the shell's pwd (not the
-    // file manager's folder) is immediately visible.
-    makeToast({
-      kind: "success",
-      message: tr("file.uploaded", {
-        name: up.displayName,
-        dir: up.targetDir,
-      }),
-    });
-    up.onDone(); // the new file should now appear in the listing
+  // Completion is decided by BYTES, never by the number of acks: a chunk that
+  // came back shorter than `UPLOAD_CHUNK` would otherwise let `ceil(size /
+  // UPLOAD_CHUNK)` acks arrive while the file is still short.
+  if (up.nextOffset >= up.total) {
+    sendUploadDone(up);
   } else {
     sendNextChunk(up);
   }
   return true;
 }
 
-/** Handle an error message (`写入失败（<path>）：…` marks a failed chunk). */
+/** Handle the server's upload verification (`sftpUploadOk`): the file on disk
+ *  is complete — its size equals what was uploaded. This — not the last chunk
+ *  ack — is what marks an upload successful. Returns true when it belongs to a
+ *  tracked upload (callers then skip their own listing refresh). */
+export function onUploadVerified(
+  savedShell: number,
+  savedPath: string,
+  size: number,
+): boolean {
+  const up = uploads.get(uploadKey(savedShell, savedPath));
+  if (!up) return false;
+  if (size !== up.total) {
+    // The server only acks a verified size, so this means the two sides
+    // disagree about what was uploaded — trust neither and fail loudly.
+    failTask(up, tr("file.taskVerify"));
+    return true;
+  }
+  uploads.delete(uploadKey(savedShell, savedPath));
+  clearWatchdog(up);
+  updateTask(up.taskId, { status: "done", done: up.total });
+  // Report each completed upload once, by its display name and the target
+  // directory — so a terminal drop that went to the shell's pwd (not the
+  // file manager's folder) is immediately visible.
+  makeToast({
+    kind: "success",
+    message: tr("file.uploaded", {
+      name: up.displayName,
+      dir: up.targetDir,
+    }),
+  });
+  up.onDone(); // the new file should now appear in the listing
+  return true;
+}
+
+/** Handle an error message (`写入失败（<path>）：…` marks a failed chunk, a
+ *  failed verification, or a rejected save). */
 export function onUploadError(message: string): void {
   const m = message.match(/写入失败（(.+?)）：/);
   if (!m) return;
   const path = m[1];
   // The server error carries only the path; a path shared by uploads on
   // several shells is ambiguous — fail every matching upload (safer than a
-  // silent stall) so the user sees the error and can retry.
+  // silent stall) so the user sees the error and can retry. Failing also
+  // deletes the partial file the failed write left behind.
   let matched = false;
-  for (const [key, up] of uploads) {
+  for (const up of [...uploads.values()]) {
     if (up.targetPath !== path) continue;
-    uploads.delete(key);
-    clearWatchdog(up);
-    updateTask(up.taskId, { status: "error", error: message });
+    failTask(up, message);
     matched = true;
   }
   if (matched) persistTasks();

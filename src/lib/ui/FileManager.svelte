@@ -13,6 +13,7 @@
     collectDropFiles,
     onUploadAck,
     onUploadError,
+    onUploadVerified,
     readDropPayload,
     startUpload,
     type DropPayload,
@@ -917,6 +918,13 @@
       applyAck(message.sftpOk);
     } else if (message.sftpWriteOk) {
       applyWriteAck(message.sftpWriteOk);
+    } else if (message.sftpUploadOk) {
+      const [savedShell, savedPath, savedSize] = message.sftpUploadOk;
+      if (!onUploadVerified(savedShell, savedPath, savedSize)) {
+        // Unknown to the upload bookkeeping — an upload started in another
+        // FileManager (or one already gone); just show where it landed.
+        if (savedShell === viewShellId) refresh();
+      }
     } else if (message.sftpCopyProgress) {
       const [, copyFrom, copyBytes] = message.sftpCopyProgress;
       copyBytesByFrom.set(copyFrom, copyBytes);

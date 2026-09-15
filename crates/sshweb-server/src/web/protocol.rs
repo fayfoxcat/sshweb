@@ -40,6 +40,13 @@ pub enum WsServer {
     /// and resume exactly where the server acknowledged (a bare `SftpOk`
     /// cannot tell a retry's ack from the original's).
     SftpWriteOk(Sid, String, u64),
+    /// A chunked upload finished **and was verified**: the server stat'ed
+    /// `path` and its on-disk size matches the total the client reported (the
+    /// echoed size). Only this message means "the file is complete" — an
+    /// acked final chunk does not (a lost chunk, or a client that counted
+    /// acks instead of bytes, can leave the file short without any write
+    /// failing). See `sftp_upload_finish`.
+    SftpUploadOk(Sid, String, u64),
     /// SFTP file read data (editor reads).
     SftpData(Sid, String, Bytes),
     /// Alert the client of an application error.
@@ -117,6 +124,16 @@ pub enum WsClient {
     SftpWrite(Sid, String, Bytes),
     /// Write bytes at an offset (chunked upload). Offset 0 truncates the file.
     SftpWriteAt(Sid, String, u64, Bytes),
+    /// Every chunk of a chunked upload was written: `total` is the file size
+    /// the client uploaded. The server verifies the on-disk size before
+    /// acknowledging with [`WsServer::SftpUploadOk`], and deletes the partial
+    /// file instead when it does not match.
+    SftpUploadDone(Sid, String, u64),
+    /// Give up on an in-flight chunked upload: the server deletes the partial
+    /// file. Ordered through the same FIFO as the chunks, so the delete can
+    /// never overtake a chunk still queued for that path (which would recreate
+    /// the partial file right after it was removed).
+    SftpUploadAbort(Sid, String),
     /// Create a directory in a shell.
     SftpMkdir(Sid, String),
     /// Delete a file or directory in a shell.

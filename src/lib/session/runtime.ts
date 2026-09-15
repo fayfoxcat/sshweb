@@ -278,6 +278,12 @@ export function createSessionRuntime(env: RuntimeEnv) {
         env.onFileMessage(message);
         return;
       }
+      if (message.sftpUploadOk) {
+        // The server verified a finished upload against its size on disk —
+        // the only message that marks a chunked upload complete.
+        env.onFileMessage(message);
+        return;
+      }
       if (message.sftpCopyProgress) {
         // Remote-copy progress: route to the file manager's progress line.
         env.onFileMessage(message);

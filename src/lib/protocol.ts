@@ -30,6 +30,10 @@ export type WsServer = {
    *  offset so the client can deduplicate retried chunks and resume exactly
    *  where the server acknowledged. */
   sftpWriteOk?: [Sid, string, number];
+  /** A chunked upload finished **and was verified**: the server stat'ed the
+   *  file and its size on disk equals the total that was uploaded (echoed
+   *  here). Only this means the file is complete — see `upload.ts`. */
+  sftpUploadOk?: [Sid, string, number];
   sftpData?: [Sid, string, Uint8Array];
   sftpShell?: Sid;
   /** Result of an `sftpOpen` / `sftpConnect` probe: [sid to browse, initial
@@ -136,6 +140,13 @@ export type WsClient = {
   sftpRead?: [Sid, string];
   sftpWrite?: [Sid, string, Uint8Array];
   sftpWriteAt?: [Sid, string, number, Uint8Array];
+  /** Every chunk of a chunked upload was written; `total` is the uploaded
+   *  size. The server verifies the file size on disk and answers with
+   *  `sftpUploadOk` (or an error, deleting the partial file). */
+  sftpUploadDone?: [Sid, string, number];
+  /** Abandon an in-flight chunked upload: the server deletes the partial file.
+   *  Queued behind the chunks, so it cannot be undone by a chunk in flight. */
+  sftpUploadAbort?: [Sid, string];
   sftpMkdir?: [Sid, string];
   sftpRemove?: [Sid, string, boolean];
   sftpRename?: [Sid, string, string];
