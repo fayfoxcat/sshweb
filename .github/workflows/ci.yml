@@ -96,7 +96,7 @@ jobs:
       # The release notes are the annotated tag's message (see 开发记录文档 §三
       # 「发布流程」), so what a release says lives in the tag, not in this file.
       # A lightweight tag has no message: the body is then only the changelog
-      # link GitHub generates.
+      # link computed below.
       - name: Release notes from the tag annotation
         run: |
           # actions/checkout leaves a *lightweight* tag ref (it fetches the commit
@@ -104,13 +104,29 @@ jobs:
           # Re-fetch the tag by name to get the annotated object.
           git fetch --force --no-recurse-submodules origin \
             "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
-          git tag -l --format='%(contents)' "${GITHUB_REF_NAME}" > RELEASE_NOTES.md
+          PREV=$(git ls-remote --tags --refs origin \
+            | sed 's#.*refs/tags/##' | sort -V \
+            | awk -v cur="${GITHUB_REF_NAME}" '$0 == cur { print prev } { prev = $0 }')
+          {
+            git tag -l --format='%(contents)' "${GITHUB_REF_NAME}"
+            if [ -n "${PREV}" ]; then
+              printf '\n**Full Changelog**: %s/%s/compare/%s...%s\n' \
+                "${GITHUB_SERVER_URL}" "${GITHUB_REPOSITORY}" "${PREV}" "${GITHUB_REF_NAME}"
+            fi
+          } > RELEASE_NOTES.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           body_path: RELEASE_NOTES.md
-          generate_release_notes: true
+
+      # softprops does not refresh the body of a release that already exists
+      # (re-pushing a tag updates assets only), so set it explicitly — this is
+      # also what makes the run idempotent.
+      - name: Make sure the release body matches the tag annotation
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${GITHUB_REF_NAME}" --notes-file RELEASE_NOTES.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
