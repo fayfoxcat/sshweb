@@ -51,6 +51,67 @@ impl SshHandler {
     }
 }
 
+/// The target presented a host key that does not match the fingerprint recorded
+/// on a previous connection (TOFU, 安全审查 H2 / 已知坑 67).
+///
+/// Almost always a reinstalled or replaced server: `/etc/ssh/ssh_host_*` are
+/// regenerated, so every fingerprint changes at once. Without an explicit way
+/// to re-trust, such a target stays unreachable forever — hence the two
+/// fingerprints travel with the error so the UI can show them and offer to
+/// re-trust (已知坑 80).
+#[derive(Debug, Clone)]
+pub struct HostKeyChanged {
+    /// `user@host:port` — the key this fingerprint is stored under.
+    pub target: String,
+    /// Fingerprint recorded on the first successful connection.
+    pub expected: String,
+    /// Fingerprint the server presented this time.
+    pub actual: String,
+}
+
+impl std::fmt::Display for HostKeyChanged {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} 的 SSH 主机密钥已变更：此前记录 {}，本次为 \
+             {}。若该服务器重装过系统或更换过主机密钥，请确认后重新信任。",
+            self.target, self.expected, self.actual
+        )
+    }
+}
+
+impl std::error::Error for HostKeyChanged {}
+
+/// Why a `client::connect*` call failed, as far as the host-key check is
+/// concerned.
+///
+/// `check_server_key` returning `false` is the **only** reason russh aborts
+/// with its opaque `UnknownKey` ("Unknown server key"), and russh reports it
+/// through the handler's own error type (`H::Error` — sshweb's
+/// `anyhow::Error`), so the original variant is not reliably downcastable here.
+/// Comparing the fingerprint the handler actually saw against the one we
+/// expected is both version-proof and more informative: it names the two keys
+/// instead of saying "unknown".
+fn connect_error(
+    err: anyhow::Error,
+    target: &str,
+    expected: Option<&String>,
+    seen: &Mutex<Option<String>>,
+) -> anyhow::Error {
+    if let Some(expected) = expected {
+        if let Some(actual) = seen.lock().clone() {
+            if &actual != expected {
+                return anyhow::Error::new(HostKeyChanged {
+                    target: target.to_string(),
+                    expected: expected.clone(),
+                    actual,
+                });
+            }
+        }
+    }
+    err
+}
+
 impl client::Handler for SshHandler {
     type Error = anyhow::Error;
 
@@ -144,13 +205,27 @@ pub async fn connect(
         // Plain direct connection: use russh's built-in TCP connect.
         client::connect(config, (server.host.as_str(), server.port), handler)
             .await
-            .map_err(|e| anyhow!("SSH connect failed: {e}"))?
+            .map_err(|e| {
+                connect_error(
+                    anyhow!("SSH connect failed: {e}"),
+                    &target,
+                    expected.as_ref(),
+                    &seen,
+                )
+            })?
     } else {
         // Proxy / jump: handshake over a custom stream.
         let stream = connect_stream(server).await?;
         client::connect_stream(config, stream, handler)
             .await
-            .map_err(|e| anyhow!("SSH connect failed: {e}"))?
+            .map_err(|e| {
+                connect_error(
+                    anyhow!("SSH connect failed: {e}"),
+                    &target,
+                    expected.as_ref(),
+                    &seen,
+                )
+            })?
     };
 
     // Authenticate to the target host with the shared credential decision
@@ -493,5 +568,66 @@ pub(crate) fn channel_event(msg: Option<ChannelMsg>) -> ChannelEvent {
         Some(ChannelMsg::Eof) => ChannelEvent::Eof,
         Some(ChannelMsg::Close) | None => ChannelEvent::Closed,
         _ => ChannelEvent::Ignore,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The mismatch is what russh hides behind "Unknown server key"; both
+    /// fingerprints must survive into the error the UI renders (已知坑 80).
+    #[test]
+    fn host_key_change_carries_both_fingerprints() {
+        let seen = Mutex::new(Some("SHA256:new".to_string()));
+        let expected = Some("SHA256:old".to_string());
+        let err = connect_error(
+            anyhow!("SSH connect failed: Unknown server key"),
+            "root@host:22",
+            expected.as_ref(),
+            &seen,
+        );
+        let mismatch = err
+            .downcast_ref::<HostKeyChanged>()
+            .expect("a changed fingerprint must be reported as a typed mismatch");
+        assert_eq!(mismatch.target, "root@host:22");
+        assert_eq!(mismatch.expected, "SHA256:old");
+        assert_eq!(mismatch.actual, "SHA256:new");
+        // The rendering (logs, terminal, SFTP errors) must name both keys too.
+        let text = err.to_string();
+        assert!(
+            text.contains("SHA256:old") && text.contains("SHA256:new"),
+            "{text}"
+        );
+    }
+
+    /// A failure that is not a host-key mismatch keeps its original message —
+    /// a refused connection must not be dressed up as a key change.
+    #[test]
+    fn unrelated_connect_failure_keeps_its_message() {
+        let seen = Mutex::new(Some("SHA256:same".to_string()));
+        let expected = Some("SHA256:same".to_string());
+        let err = connect_error(
+            anyhow!("SSH connect failed: Connection refused"),
+            "root@host:22",
+            expected.as_ref(),
+            &seen,
+        );
+        assert!(err.downcast_ref::<HostKeyChanged>().is_none());
+        assert_eq!(err.to_string(), "SSH connect failed: Connection refused");
+    }
+
+    /// First connect (nothing recorded yet): `check_server_key` accepts any
+    /// key, so a later failure is never a mismatch.
+    #[test]
+    fn first_connect_is_never_a_mismatch() {
+        let seen = Mutex::new(Some("SHA256:any".to_string()));
+        let err = connect_error(
+            anyhow!("SSH connect failed: Connection timeout"),
+            "root@host:22",
+            None,
+            &seen,
+        );
+        assert!(err.downcast_ref::<HostKeyChanged>().is_none());
     }
 }

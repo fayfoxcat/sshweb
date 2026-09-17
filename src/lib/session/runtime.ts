@@ -1,6 +1,7 @@
 import { get, writable } from "svelte/store";
 
 import { servers, serverTargetKey } from "../connections";
+import { hostKeyPrompt, hostKeyPromptFromMessage } from "../hostkey";
 import { tr } from "../i18n";
 import type { Toast } from "../toast";
 import type {
@@ -383,7 +384,17 @@ export function createSessionRuntime(env: RuntimeEnv) {
       // terminal still matches (the FileManager guard checks this).
       env.openFileBrowser(sid, cwd, key, !!flow?.fromList);
       if (notice) {
-        env.toast("info", notice);
+        // A changed host key arrives as the notice text (已知坑 80). It is not
+        // an `error` message, so the file manager never sees it: the re-trust
+        // dialog has to be opened here. It replaces the toast rather than
+        // accompanying it — the dialog repeats the text in full and adds the
+        // way out.
+        const hostKey = hostKeyPromptFromMessage(notice);
+        if (hostKey) {
+          hostKeyPrompt.set(hostKey);
+        } else {
+          env.toast("info", notice);
+        }
       } else if (serverName && flow?.fromList) {
         // Only the server-list SFTP button reports an opening toast; the
         // terminal's file-manager toggle is silent (it follows the active

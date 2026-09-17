@@ -334,6 +334,17 @@ const zh = {
   "api.requestFailed": "请求失败 ({status})",
   "api.invalidResponse":
     "服务端返回了无效响应(服务端可能已过旧,请重启服务端后刷新页面)。",
+  // 主机密钥变更 (坑 80)
+  "hostkey.title": "服务器主机密钥已变更",
+  "hostkey.message":
+    "该服务器本次出示的 SSH 主机密钥，与首次连接时记录的指纹不一致，连接被拒绝。",
+  "hostkey.expected": "此前记录",
+  "hostkey.actual": "本次出示",
+  "hostkey.warning":
+    "服务器重装系统或更换过主机密钥时属正常，确认后可重新信任。否则可能是中间人攻击，请勿继续。重新信任只清除该服务器的记录指纹，下次连接成功时会重新记录。",
+  "hostkey.retrust": "重新信任",
+  "hostkey.retrusting": "处理中…",
+  "hostkey.done": "已重新信任 {target}，请重试连接。",
 };
 
 /** Every key the UI can translate; `en` must cover exactly this set. */

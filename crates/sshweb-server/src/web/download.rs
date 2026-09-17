@@ -56,7 +56,26 @@ pub(crate) async fn get_sftp_download(
     };
     let length = end.saturating_sub(start) + 1;
 
-    let reader = match session.download_reader(sid, &path, start).await {
+    // An empty file has nothing to stream, and `end` above is `size - 1` capped
+    // at 0, so `length` would be 1: a Content-Length the reader can never
+    // satisfy (the download is reported as broken by the client). A ranged
+    // request against it is still unsatisfiable, and answered above.
+    if size == 0 {
+        let filename = sanitize_disposition_name(&sftp::file_basename(&path));
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "application/octet-stream")
+            .header(header::ACCEPT_RANGES, "bytes")
+            .header(header::CONTENT_LENGTH, 0)
+            .header(
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{filename}\""),
+            )
+            .body(Body::empty())
+            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+    }
+
+    let reader = match session.download_reader(sid, &path, start, length).await {
         Ok(reader) => reader,
         Err(err) => {
             tracing::warn!(?err, %sid, path = %path, "download open failed");
@@ -242,9 +261,9 @@ fn download_stream(
     reader: sftp::DownloadReader,
     length: u64,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> {
-    // Match the remote SFTP read limit (OpenSSH advertises 256 KiB) so each
-    // chunk is one round-trip on high-latency links; the reader clamps to the
-    // server's actual limit if smaller.
+    // Each chunk is one already-buffered piece: the remote reader keeps several
+    // 256 KiB SFTP reads in flight, so pulling one piece per chunk drains that
+    // queue without ever waiting on a round trip (已知坑 77's download twin).
     const CHUNK: u64 = 256 * 1024;
     stream::unfold((reader, length), |(mut reader, mut remaining)| async move {
         if remaining == 0 {

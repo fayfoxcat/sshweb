@@ -36,6 +36,7 @@
     type Socks5FormFields,
   } from "$lib/connections";
   import { TERMINAL_ENCODINGS } from "$lib/encoding";
+  import { hostKeyPrompt, hostKeyPromptFrom } from "$lib/hostkey";
   import { lang, t } from "$lib/i18n";
   import { createKey, installKey, keys } from "$lib/keys";
   import { makeToast, toastError } from "$lib/toast";
@@ -376,7 +377,14 @@
       const message = await testServerConnection(cfg);
       makeToast({ kind: "success", message });
     } catch (err) {
-      toastError(err);
+      // A changed host key has its own dialog carrying both fingerprints — a
+      // toast would only repeat the text with no way forward (已知坑 80).
+      const prompt = hostKeyPromptFrom(err);
+      if (prompt) {
+        hostKeyPrompt.set(prompt);
+      } else {
+        toastError(err);
+      }
     } finally {
       testing = false;
     }

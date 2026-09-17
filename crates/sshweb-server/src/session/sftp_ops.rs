@@ -238,6 +238,15 @@ impl Session {
             }
             sftp::SftpConnectError::Connect(err) => {
                 tracing::warn!(%browse_sid, ?err, "remote sftp probe failed");
+                // A changed host key is actionable on its own — it names both
+                // fingerprints and says how to clear the record — so it is the
+                // one connect failure passed through verbatim (已知坑 80).
+                // Everything else keeps the generic hint (the detail stays in
+                // the log, as before).
+                let notice = match err.downcast_ref::<crate::ssh::HostKeyChanged>() {
+                    Some(mismatch) => mismatch.to_string(),
+                    None => "无法连接该服务器的 SFTP 服务，请稍后重试".to_string(),
+                };
                 // Failed to reach the server at all: headless retry at root.
                 let browse_sid = if headless_retry {
                     self.connect_sftp_shell(server.clone())
@@ -248,7 +257,7 @@ impl Session {
                     browse_sid,
                     "/".into(),
                     String::new(),
-                    Some("无法连接该服务器的 SFTP 服务，请稍后重试".to_string()),
+                    Some(notice),
                 ));
             }
         }
@@ -303,20 +312,25 @@ impl Session {
         .await
     }
 
-    /// Open a streaming reader for a file at `offset` (HTTP Range download).
+    /// Open a streaming reader for `length` bytes of a file from `offset`
+    /// (HTTP Range download).
     pub async fn download_reader(
         &self,
         id: Sid,
         path: &str,
         offset: u64,
+        length: u64,
     ) -> Result<sftp::DownloadReader> {
         let path = path.to_owned();
         match self.shell_target(id) {
             Some((server, pool)) => {
-                Self::remote_timeout(&pool, sftp::reader_remote(&pool, &server, &path, offset))
-                    .await
+                Self::remote_timeout(
+                    &pool,
+                    sftp::reader_remote(&pool, &server, &path, offset, length),
+                )
+                .await
             }
-            None => sftp::reader_local(&path, offset).await,
+            None => sftp::reader_local(&path, offset, length).await,
         }
     }
 

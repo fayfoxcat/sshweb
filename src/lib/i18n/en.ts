@@ -337,6 +337,16 @@ const en = {
   "api.requestFailed": "Request failed ({status})",
   "api.invalidResponse":
     "Invalid server response (the server may be out of date; restart it and refresh).",
+  "hostkey.title": "Server host key changed",
+  "hostkey.message":
+    "The SSH host key this server presented does not match the fingerprint recorded on the first connection, so the connection was refused.",
+  "hostkey.expected": "Recorded earlier",
+  "hostkey.actual": "Presented now",
+  "hostkey.warning":
+    "This is expected after a reinstall or a host-key rotation — re-trust to continue. Otherwise it may be a man-in-the-middle attack; do not continue. Re-trusting drops only this server's recorded fingerprint, which the next successful connection records again.",
+  "hostkey.retrust": "Re-trust",
+  "hostkey.retrusting": "Working…",
+  "hostkey.done": "Re-trusted {target}. Please retry the connection.",
 } satisfies Record<ZhKey, string>;
 
 export { en };

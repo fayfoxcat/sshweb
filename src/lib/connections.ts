@@ -311,7 +311,8 @@ export async function moveServer(fromId: string, toId: string): Promise<void> {
 
 /** Test an (possibly unsaved) server configuration by having the server open an
  *  SSH transport connection and authenticate. Resolves to the server's message
- *  on success; throws with a readable reason on failure. */
+ *  on success; throws with a readable reason on failure — a host-key change
+ *  throws an `ApiError` whose body carries both fingerprints (已知坑 80). */
 export async function testServerConnection(
   server: ServerInput,
 ): Promise<string> {
@@ -320,4 +321,18 @@ export async function testServerConnection(
     body: JSON.stringify({ server }),
   });
   return result.message;
+}
+
+/** Drop a target's recorded SSH host key fingerprint, so the next connection is
+ *  treated as a first connect and records whatever the server presents
+ *  (已知坑 80) — the "重新信任" action.
+ *
+ *  `target` is the `user@host:port` form fingerprints are stored under, i.e.
+ *  exactly what `serverTargetKey` returns. Only call this after the user has
+ *  seen both fingerprints and confirmed the change is expected. */
+export async function forgetHostKey(target: string): Promise<void> {
+  await request<void>("/api/host-keys/forget", {
+    method: "POST",
+    body: JSON.stringify({ target }),
+  });
 }

@@ -100,8 +100,15 @@ impl Terminal {
         env::set_var("TERM_PROGRAM", "sshweb");
         env::remove_var("TERM_PROGRAM_VERSION");
 
-        // Start the process.
-        execvp(shell, &[shell])
+        // Start the process as a *login* shell, so `/etc/profile` and
+        // `/etc/profile.d/*.sh` are read exactly like `ssh host` does. Without
+        // `-l` the shell only reads its own rc file, and anything injected into
+        // the PATH by profile.d (a database client, a language toolchain) is
+        // missing — the local twin of 已知坑 76. `-l` is understood by
+        // bash/dash/zsh/ksh/fish alike; the dash-prefixed `argv[0]` convention
+        // is equivalent for bash/dash but fish rejects it, so `-l` is what we
+        // pass.
+        execvp(shell, &[shell, c"-l"])
     }
 
     /// Get the window size of the TTY. Only used by unit tests (production

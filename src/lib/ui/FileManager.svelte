@@ -4,6 +4,7 @@
 
   import type { WsClient, WsServer, WsSftpEntry } from "$lib/protocol";
   import { makeToast } from "$lib/toast";
+  import { hostKeyPrompt, hostKeyPromptFromMessage } from "$lib/hostkey";
   import { lang, t } from "$lib/i18n";
   import type { Srocket } from "$lib/srocket";
   import { formatMode, formatSize } from "$lib/format";
@@ -1005,7 +1006,17 @@
       pendingDeletes = new Set();
       pendingDeleteNames = [];
     }
-    makeToast({ kind: "error", message });
+    // A connect failure caused by a changed host key: the text already names
+    // both fingerprints, and re-trusting is the only way forward (已知坑 80).
+    // The message carries the target identity, so the dialog never has to
+    // guess which server is meant — and it replaces the toast, which would
+    // only repeat the same text with no way out.
+    const hostKey = hostKeyPromptFromMessage(message);
+    if (hostKey) {
+      hostKeyPrompt.set(hostKey);
+    } else {
+      makeToast({ kind: "error", message });
+    }
     loading = false;
     onUploadError(message);
     if (message.startsWith("重命名失败") || message.startsWith("复制失败")) {
@@ -1274,9 +1285,7 @@
           {formatMode(entry.mode)}
         </span>
 
-        <span
-          class="fm-size w-20 shrink-0 text-right text-xs text-zinc-500"
-        >
+        <span class="fm-size w-20 shrink-0 text-right text-xs text-zinc-500">
           {entry.isDir ? "" : formatSize(entry.size)}
         </span>
       </div>

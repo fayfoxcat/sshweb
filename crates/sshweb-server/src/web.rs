@@ -34,6 +34,23 @@ struct StatsQuery {
 #[derive(Serialize)]
 struct ErrorPayload {
     error: String,
+    /// Present only for a host-key mismatch (已知坑 80): the two fingerprints,
+    /// so the frontend can render a "该服务器主机密钥已变更" confirmation and
+    /// offer to re-trust instead of showing a bare "Unknown server key".
+    #[serde(rename = "hostKeyChanged", skip_serializing_if = "Option::is_none")]
+    host_key_changed: Option<HostKeyChangedPayload>,
+}
+
+/// The detail behind a host-key mismatch — mirrors
+/// [`crate::ssh::HostKeyChanged`].
+#[derive(Serialize)]
+struct HostKeyChangedPayload {
+    /// `user@host:port` the fingerprint is stored under.
+    target: String,
+    /// Fingerprint recorded on the first successful connection.
+    expected: String,
+    /// Fingerprint the server presented this time.
+    actual: String,
 }
 
 /// Returns the web application server, routed with Axum.
@@ -103,6 +120,10 @@ fn backend() -> Router<Arc<ServerState>> {
             axum::routing::post(keys::test_connection),
         )
         .route(
+            "/host-keys/forget",
+            axum::routing::post(keys::forget_host_key),
+        )
+        .route(
             "/proxies",
             get(proxies::list_proxies).post(proxies::start_proxy),
         )
@@ -123,10 +144,39 @@ fn backend() -> Router<Arc<ServerState>> {
 }
 
 fn error_response(status: StatusCode, error: impl Into<String>) -> Response {
+    error_response_detail(status, error.into(), None)
+}
+
+/// Error response that also carries a host-key mismatch, so the frontend can
+/// show both fingerprints and offer to re-trust (已知坑 80). The plain-text
+/// `error` field stays populated, so a client that only reads that (or a log
+/// line) still gets the full human-readable explanation.
+pub(crate) fn error_response_host_key(
+    status: StatusCode,
+    error: impl Into<String>,
+    mismatch: &crate::ssh::HostKeyChanged,
+) -> Response {
+    error_response_detail(
+        status,
+        error.into(),
+        Some(HostKeyChangedPayload {
+            target: mismatch.target.clone(),
+            expected: mismatch.expected.clone(),
+            actual: mismatch.actual.clone(),
+        }),
+    )
+}
+
+fn error_response_detail(
+    status: StatusCode,
+    error: String,
+    host_key_changed: Option<HostKeyChangedPayload>,
+) -> Response {
     (
         status,
         Json(ErrorPayload {
-            error: error.into(),
+            error,
+            host_key_changed,
         }),
     )
         .into_response()

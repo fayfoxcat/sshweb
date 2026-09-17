@@ -663,6 +663,27 @@ impl ConfigStore {
         }
     }
 
+    /// Drop the stored host key fingerprint for `target`, so the next
+    /// connection is treated as a first connect again (re-recorded on success).
+    /// Returns whether an entry was actually removed.
+    ///
+    /// The counterpart of [`Self::record_host_key`] and the only way out of a
+    /// mismatch: a reinstalled or replaced target legitimately presents a new
+    /// host key, and without this the TOFU check would reject it forever
+    /// (已知坑 80). Called only from the authenticated "重新信任" action — the
+    /// user has seen both fingerprints and confirmed.
+    pub fn forget_host_key(&self, target: &str) -> bool {
+        let mut guard = self.unlocked.write();
+        let Some(state) = guard.as_mut() else {
+            return false;
+        };
+        if state.settings.host_keys.remove(target).is_none() {
+            return false;
+        }
+        let _ = self.persist(state);
+        true
+    }
+
     /// Resolve `auth_method` / `key_id` into the concrete private key used to
     /// authenticate. Key-mode configs referencing a missing or deleted key
     /// error out clearly instead of silently falling back to a password.
@@ -1001,6 +1022,54 @@ mod tests {
         assert!(store.login(&key).is_err());
         let token2 = store.login("newpass123").unwrap();
         assert!(!store.is_pending_change(&token2));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The TOFU reset behind "重新信任" (已知坑 80): drop exactly the named
+    /// target, persist, and leave every other target trusted.
+    #[test]
+    fn forget_host_key_drops_one_target_and_persists() {
+        let dir = std::env::temp_dir().join(format!(
+            "sshweb-hostkey-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = dir.join("config.enc");
+        let store = ConfigStore::new(path.clone()).unwrap();
+        store.setup("123456", "123456").unwrap();
+
+        store.record_host_key("root@a:22", "SHA256:aaa".into());
+        store.record_host_key("root@b:22", "SHA256:bbb".into());
+        assert_eq!(
+            store.host_key_for("root@a:22").as_deref(),
+            Some("SHA256:aaa")
+        );
+
+        assert!(store.forget_host_key("root@a:22"));
+        assert_eq!(store.host_key_for("root@a:22"), None);
+        // Reinstalling one server must not un-trust the others.
+        assert_eq!(
+            store.host_key_for("root@b:22").as_deref(),
+            Some("SHA256:bbb")
+        );
+
+        // Forgotten for real, not just in memory: a fresh store on the same
+        // file sees it gone. Without this the dialog would appear to work and
+        // the same failure would return after a restart.
+        let reopened = ConfigStore::new(path).unwrap();
+        reopened.login("123456").unwrap();
+        assert_eq!(reopened.host_key_for("root@a:22"), None);
+        assert_eq!(
+            reopened.host_key_for("root@b:22").as_deref(),
+            Some("SHA256:bbb")
+        );
+
+        // Nothing recorded for it → the HTTP layer turns this into a 404 rather
+        // than pretending something was forgotten.
+        assert!(!reopened.forget_host_key("root@a:22"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

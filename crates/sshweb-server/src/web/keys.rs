@@ -12,7 +12,7 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 
 use super::auth::cookie_header;
-use super::{error_response, require_auth};
+use super::{error_response, error_response_host_key, require_auth};
 use crate::config::ConfigStore;
 use crate::web::protocol::ServerConfig;
 use crate::ServerState;
@@ -177,11 +177,58 @@ pub(crate) async fn test_connection(
             message: format!("连接成功：{}", target_label(&server)),
         })
         .into_response(),
-        Ok(Err(err)) => error_response(StatusCode::BAD_REQUEST, format!("连接失败：{err:#}")),
+        // A host-key mismatch is the one connection failure the user can fix
+        // themselves, so it travels with both fingerprints instead of the bare
+        // "Unknown server key" russh produces (已知坑 80).
+        Ok(Err(err)) => {
+            let message = format!("连接失败：{err:#}");
+            match err.downcast_ref::<crate::ssh::HostKeyChanged>() {
+                Some(mismatch) => {
+                    error_response_host_key(StatusCode::BAD_REQUEST, message, mismatch)
+                }
+                None => error_response(StatusCode::BAD_REQUEST, message),
+            }
+        }
         Err(_) => error_response(
             StatusCode::GATEWAY_TIMEOUT,
             format!("连接超时：{}", target_label(&server)),
         ),
+    }
+}
+
+/// `POST /api/host-keys/forget` body: the `user@host:port` to re-trust.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ForgetHostKeyPayload {
+    target: String,
+}
+
+/// `POST /api/host-keys/forget` — drop a target's recorded SSH host key
+/// fingerprint (TOFU reset), so the next connection counts as a first connect
+/// and records whatever the server presents (已知坑 80).
+///
+/// This is the "重新信任" action behind the host-key-changed dialog: the user
+/// has seen both fingerprints and confirmed the change is expected (a
+/// reinstalled or replaced server). Reaching this endpoint requires an
+/// authenticated session, which already grants access to every saved
+/// credential, so re-trusting a host key is not a privilege escalation — and
+/// forgetting a target that was never recorded just reports 404.
+pub(crate) async fn forget_host_key(
+    State(state): State<Arc<ServerState>>,
+    headers: HeaderMap,
+    Json(payload): Json<ForgetHostKeyPayload>,
+) -> Response {
+    if let Some(resp) = require_auth(&state, &headers) {
+        return resp;
+    }
+    let target = payload.target.trim();
+    if target.is_empty() {
+        return error_response(StatusCode::BAD_REQUEST, "缺少目标服务器标识");
+    }
+    if state.config().forget_host_key(target) {
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        error_response(StatusCode::NOT_FOUND, "没有该服务器的主机密钥记录")
     }
 }
 
