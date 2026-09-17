@@ -166,7 +166,7 @@ pub(crate) async fn get_config(
 pub(crate) async fn put_config(
     State(state): State<Arc<ServerState>>,
     headers: HeaderMap,
-    Json(settings): Json<crate::config::ServerSettings>,
+    Json(settings): Json<crate::config::SaveSettingsRequest>,
 ) -> Response {
     match state
         .config()

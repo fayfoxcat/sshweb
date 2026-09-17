@@ -9,6 +9,9 @@ const zh = {
   "common.unknown": "未知",
   "common.delete": "删除",
   "common.copySuffix": "副本",
+  "common.copied": "已复制",
+  "common.copyFailed": "复制失败",
+  "common.toastCopyHint": "点击复制这条提示的内容",
 
   // Auth gate
   "auth.loading": "正在连接服务端…",
@@ -189,6 +192,21 @@ const zh = {
   "servers.localDesc": "ssh web 服务所在主机",
   "servers.newLocal": "新建本地终端",
   "servers.openLocal": "打开本机文件系统",
+  "servers.localEdit": "编辑本机设置",
+  "servers.localTitle": "本机设置",
+  "servers.localTitleDesc": "sshweb 服务所在主机上的终端与文件系统",
+  "servers.localSaved": "已保存本机设置。",
+  "servers.localEncodingHint":
+    "本机终端的输出/输入转码。文件浏览与下载是纯字节流,文本解码在编辑器里按文件切换。",
+  "servers.localHome": "家目录",
+  "servers.localHomePlaceholder": "留空 = 保持现状",
+  "servers.localHomeDesc":
+    "新建本机终端与「本机文件系统」的默认起始目录。支持绝对路径,或以 ~ / 相对路径表示 $HOME 下的路径(如 project);路径不存在时忽略并回退默认。只对新开的终端/文件浏览器生效。",
+  "servers.localSocks5": "SOCKS5 直连代理",
+  "servers.localSocks5Hint":
+    "在本机开一个直连的 SOCKS5 端口(不走 SSH),勾选启用后列表的 ⚡ 开关控制开启/关闭。仅监听 127.0.0.1。",
+  "servers.localSocks5Warn":
+    "未设置用户名:任何能访问 127.0.0.1 的程序都可以使用这个代理。",
   "servers.connect": "连接此服务器",
   "servers.ftp": "打开此服务器的文件系统 (SFTP)",
   "servers.edit": "编辑",
@@ -238,6 +256,15 @@ const zh = {
   "servers.socks5User": "用户名(可选)",
   "servers.socks5UserPlaceholder": "留空表示无认证",
   "servers.socks5Pass": "密码(可选)",
+  "servers.socks5AutoPort": "自动分配",
+  "servers.socks5DirectStart": "启动本机直连 SOCKS5 代理",
+  "servers.socks5DirectStop":
+    "关闭本机直连 SOCKS5 代理(socks5://127.0.0.1:{port})",
+  "servers.socks5DirectStarted":
+    "已开启本机直连 SOCKS5 代理:socks5://127.0.0.1:{port}",
+  "servers.socks5DirectStopped": "已关闭本机直连 SOCKS5 代理。",
+  "servers.socks5DirectNeedConfig":
+    "未启用本机 SOCKS5 代理,请先在本机设置中勾选启用。",
   "servers.socks5Start": "启动 SOCKS5 隧道",
   "servers.socks5Stop": "关闭 SOCKS5 隧道",
   "servers.socks5StopAt": "关闭 SOCKS5 隧道(socks5://127.0.0.1:{port})",

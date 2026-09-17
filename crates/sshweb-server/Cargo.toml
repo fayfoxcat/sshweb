@@ -59,3 +59,5 @@ nix = { version = "0.27.1", features = ["fs", "ioctl", "process", "signal", "ter
 # Test builds union features with [dependencies]: the trimmed set above plus
 # the test runtime/macros.
 tokio = { workspace = true, features = ["test-util"] }
+# `ServiceExt::oneshot` — drives a `Router` in-process for route-table tests.
+tower = { version = "0.5", features = ["util"] }

@@ -14,7 +14,7 @@ use parking_lot::{Mutex, RwLock};
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 
-use crate::web::protocol::ServerConfig;
+use crate::web::protocol::{LocalSettings, ServerConfig};
 
 const FILE_VERSION: u32 = 1;
 const SALT_BYTES: usize = 16;
@@ -39,6 +39,33 @@ pub struct ServerSettings {
     /// default keeps configs written before this field existed readable.
     #[serde(default)]
     pub host_keys: std::collections::HashMap<String, String>,
+    /// 「本机」条目(服务器面板里那行)的设置,见
+    /// [`crate::web::protocol::LocalSettings`]。同样的 `serde` default 约定:
+    /// 早于本字段的配置照常可读。
+    #[serde(default)]
+    pub local: LocalSettings,
+}
+
+/// The body of `PUT /api/config`, the browser's only settings write.
+///
+/// Deliberately narrower than [`ServerSettings`]: the payload carries only the
+/// sections the browser UI owns, and every optional one means "leave the stored
+/// value alone" when absent. `local` must be distinguishable as "absent" from
+/// "explicitly cleared", which is why it is an `Option` here while the stored
+/// field is a plain [`LocalSettings`] — and it is also why an old (stale) tab
+/// that PUTs servers only cannot wipe the local-machine settings (已知坑 81).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveSettingsRequest {
+    /// Saved SSH server configurations (the whole list; the browser owns it).
+    #[serde(default)]
+    pub servers: Vec<StoredServerConfig>,
+    /// SSH keys — see [`ConfigStore::save_settings`] for the non-empty rule.
+    #[serde(default)]
+    pub keys: Vec<StoredKey>,
+    /// 「本机」设置;`None` = 不改动已存的值。
+    #[serde(default)]
+    pub local: Option<LocalSettings>,
 }
 
 /// A persisted SSH keypair (Ed25519). The private key stays server-side inside
@@ -421,11 +448,32 @@ impl ConfigStore {
         self.with_state_read(cookie_header, |state| state.settings.clone())
     }
 
+    /// 「本机」设置(见 [`LocalSettings`])。**故意不要求认证、不返回错误**:
+    /// 与 [`Self::host_key_for`] 同一条内部读取路径——调用它的是本机 shell
+    /// 启动、 本机 SFTP 起始目录与本机直连代理,都在 WS/REST
+    /// 的认证之后运行,而 `STALE_AUTH`
+    /// 不该让「新建本地终端」失败。配置尚未解锁(未初始化/未登录)时
+    /// 返回默认值,即"没有本机设置"。
+    pub fn local_settings(&self) -> LocalSettings {
+        self.unlocked
+            .read()
+            .as_ref()
+            .map(|state| state.settings.local.clone())
+            .unwrap_or_default()
+    }
+
     /// Replace settings and persist them for an authenticated request.
+    ///
+    /// This is a **partial** merge, not a whole-struct replace: the browser's
+    /// `PUT /api/config` payload only carries the sections its UI owns, so a
+    /// section that is absent from the payload must survive untouched. Any new
+    /// top-level section has to be handled here as well — otherwise it is
+    /// silently dropped on every save (the PUT still answers 204, so the write
+    /// looks successful). See 已知坑 81.
     pub fn save_settings(
         &self,
         cookie_header: Option<&str>,
-        settings: ServerSettings,
+        settings: SaveSettingsRequest,
     ) -> Result<()> {
         self.with_state_mut(cookie_header, |state| {
             // The browser's `PUT /api/config` manages only servers; SSH keys are
@@ -435,6 +483,13 @@ impl ConfigStore {
                 state.settings.keys = settings.keys;
             }
             state.settings.servers = settings.servers;
+            // 「本机」设置:同上,只在前端**显式**给出时覆盖。这里不能照抄
+            // `keys` 的"非空才合并"——四项全部清空是合法操作,拿默认值当"没提到"
+            // 会把清空操作吃掉,所以请求体里用 `Option` 明确区分两者(`None` =
+            // 不改)。
+            if let Some(local) = settings.local {
+                state.settings.local = local;
+            }
             self.persist(state)
         })
     }
@@ -1070,6 +1125,99 @@ mod tests {
         // Nothing recorded for it → the HTTP layer turns this into a 404 rather
         // than pretending something was forgotten.
         assert!(!reopened.forget_host_key("root@a:22"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The partial merge in [`ConfigStore::save_settings`] (已知坑 81): a
+    /// section the payload does not mention must survive, and only an explicit
+    /// value overwrites it. This is a pure invariant no browser test can prove
+    /// — a save that drops `local` still answers 204 and looks successful.
+    #[test]
+    fn save_settings_keeps_sections_the_payload_omits() {
+        let dir = std::env::temp_dir().join(format!(
+            "sshweb-save-settings-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = dir.join("config.enc");
+        let store = ConfigStore::new(path.clone()).unwrap();
+        let token = store.setup("123456", "123456").unwrap();
+        let cookie = format!("{COOKIE_NAME}={token}");
+
+        // Fresh store: the hand-written `Default` gives utf-8, not "" (the
+        // frontend's encoding select would show blank otherwise).
+        assert_eq!(store.local_settings().encoding, "utf-8");
+
+        // 1. A save that carries `local` stores it.
+        store
+            .save_settings(
+                Some(&cookie),
+                SaveSettingsRequest {
+                    servers: Vec::new(),
+                    keys: Vec::new(),
+                    local: Some(LocalSettings {
+                        startup: "export FOO=bar".into(),
+                        encoding: "gbk".into(),
+                        home: "/data/app".into(),
+                        socks5_tunnel: None,
+                    }),
+                },
+            )
+            .unwrap();
+        assert_eq!(store.local_settings().home, "/data/app");
+
+        // 2. A save that does NOT mention `local` (what an old tab or the server form
+        //    sends) leaves it alone instead of resetting it.
+        store
+            .save_settings(
+                Some(&cookie),
+                SaveSettingsRequest {
+                    servers: Vec::new(),
+                    keys: Vec::new(),
+                    local: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(store.local_settings().home, "/data/app");
+        assert_eq!(store.local_settings().startup, "export FOO=bar");
+
+        // 3. Clearing all four fields is a legitimate save, so an explicit (default)
+        //    value must win over the stored one.
+        store
+            .save_settings(
+                Some(&cookie),
+                SaveSettingsRequest {
+                    servers: Vec::new(),
+                    keys: Vec::new(),
+                    local: Some(LocalSettings::default()),
+                },
+            )
+            .unwrap();
+        assert_eq!(store.local_settings().home, "");
+        assert_eq!(store.local_settings().encoding, "utf-8");
+
+        // 4. Persisted for real, and the neighbouring sections are untouched.
+        store.record_host_key("root@a:22", "SHA256:aaa".into());
+        store
+            .save_settings(
+                Some(&cookie),
+                SaveSettingsRequest {
+                    servers: Vec::new(),
+                    keys: Vec::new(),
+                    local: None,
+                },
+            )
+            .unwrap();
+        let reopened = ConfigStore::new(path).unwrap();
+        reopened.login("123456").unwrap();
+        assert_eq!(reopened.local_settings().home, "");
+        assert_eq!(
+            reopened.host_key_for("root@a:22").as_deref(),
+            Some("SHA256:aaa")
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

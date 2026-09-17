@@ -11,6 +11,7 @@ use sshweb_core::Sid;
 use super::Session;
 use crate::sftp;
 use crate::sftp::SftpPool;
+use crate::utils::resolve_start_dir;
 use crate::web::protocol::{ServerConfig, WsServer};
 
 /// An ordered-file write operation (chunked uploads + whole-file saves),
@@ -56,32 +57,6 @@ impl WriteOp {
     }
 }
 
-/// Resolve a configured/prompt working directory to an absolute SFTP path:
-/// empty or `~` → the probed login home; `~/…` and bare relative paths are
-/// anchored at that home; absolute paths pass through unchanged (they are
-/// used verbatim as the browse start).
-fn resolve_start_dir(dir: &str, home: &str) -> String {
-    let dir = dir.trim();
-    if dir.is_empty() || dir == "~" {
-        return home.to_string();
-    }
-    let rest = if let Some(rest) = dir.strip_prefix("~/") {
-        rest
-    } else if dir.starts_with('/') {
-        return dir.to_string();
-    } else {
-        // Bare relative path (e.g. `project`): anchored at the user's home.
-        dir
-    };
-    if rest.is_empty() {
-        return home.to_string();
-    }
-    if home.is_empty() {
-        return dir.to_string();
-    }
-    format!("{}/{}", home.trim_end_matches('/'), rest)
-}
-
 impl Session {
     /// Open the file manager for a shell, resolving the initial path for the
     /// terminal's server. The SFTP identity is always the **configured** user
@@ -103,20 +78,29 @@ impl Session {
     /// on the first open, and the frontend keeps it thereafter.
     pub async fn sftp_open(&self, id: Sid) {
         let Some((server, pool)) = self.shell_target(id) else {
-            // Local shell: browse the server's own filesystem.
+            // Local shell: browse the server's own filesystem, starting at the
+            // configured 「本机」home when it is set and exists. Otherwise fall
+            // back to the process working directory (the previous behavior),
+            // then `/` (已知坑 81/82).
             let user = std::env::var("USER").unwrap_or_else(|_| "unknown".into());
-            let cwd = Self::run_local(
-                || {
-                    Ok(std::env::current_dir()
-                        .ok()
-                        .and_then(|p| p.to_str().map(|s| s.to_string()))
-                        .filter(|s| !s.is_empty())
-                        .unwrap_or_else(|| "/".into()))
-                },
-                "cwd",
-            )
-            .await
-            .unwrap_or_else(|_| "/".into());
+            let cwd = match crate::utils::resolve_local_start_dir(
+                None,
+                &self.config().local_settings().home,
+            ) {
+                Some(dir) => dir,
+                None => Self::run_local(
+                    || {
+                        Ok(std::env::current_dir()
+                            .ok()
+                            .and_then(|p| p.to_str().map(|s| s.to_string()))
+                            .filter(|s| !s.is_empty())
+                            .unwrap_or_else(|| "/".into()))
+                    },
+                    "cwd",
+                )
+                .await
+                .unwrap_or_else(|_| "/".into()),
+            };
             self.send(WsServer::SftpOpenResult(id, cwd, user, None));
             return;
         };

@@ -37,9 +37,10 @@ mod web;
 /// encrypted-configuration data model and the SSH/wire types that model embeds
 /// (implementation modules are crate-private).
 pub use config::{
-    ConfigStore, KeyInfo, ServerRow, ServerSettings, Status, StoredKey, StoredServerConfig,
+    ConfigStore, KeyInfo, SaveSettingsRequest, ServerRow, ServerSettings, Status, StoredKey,
+    StoredServerConfig,
 };
-pub use web::protocol::{JumpHost, ProxyConfig, ServerConfig, Socks5Tunnel};
+pub use web::protocol::{JumpHost, LocalSettings, ProxyConfig, ServerConfig, Socks5Tunnel};
 
 /// Options when constructing the application server.
 #[derive(Clone, Debug, Default)]

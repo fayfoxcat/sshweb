@@ -10,6 +10,9 @@ const en = {
   "common.unknown": "unknown",
   "common.delete": "Delete",
   "common.copySuffix": " (copy)",
+  "common.copied": "Copied",
+  "common.copyFailed": "Copy failed",
+  "common.toastCopyHint": "Click to copy this notice",
 
   "auth.loading": "Connecting to server…",
   "auth.loginTitle": "Sign in to sshweb",
@@ -189,6 +192,17 @@ const en = {
   "servers.localDesc": "Host running the ssh web service",
   "servers.newLocal": "New local terminal",
   "servers.openLocal": "Open local files",
+  "servers.localEdit": "Edit local settings",
+  "servers.localTitle": "Local settings",
+  "servers.localTitleDesc":
+    "Terminals and files on the host running the sshweb service",
+  "servers.localSaved": "Local settings saved.",
+  "servers.localEncodingHint":
+    "Transcoding for local terminal output/input. Browsing and downloading are raw byte streams; text decoding is chosen per file in the editor.",
+  "servers.localHome": "Home directory",
+  "servers.localHomePlaceholder": "Leave empty to keep the current behavior",
+  "servers.localHomeDesc":
+    "Default starting directory for new local terminals and the local file browser. Absolute paths, or `~` / a relative path under $HOME (e.g. `project`); a missing path is ignored and falls back to the default. Applies to newly opened terminals / file views only.",
   "servers.connect": "Connect to this server",
   "servers.ftp": "Open this server's files (SFTP)",
   "servers.edit": "Edit",
@@ -239,6 +253,20 @@ const en = {
   "servers.socks5User": "Username (optional)",
   "servers.socks5UserPlaceholder": "Leave empty for no authentication",
   "servers.socks5Pass": "Password (optional)",
+  "servers.socks5AutoPort": "Auto",
+  "servers.localSocks5": "Direct SOCKS5 proxy",
+  "servers.localSocks5Hint":
+    "Listen on a local SOCKS5 port that connects out directly (no SSH); once enabled, toggle it with the ⚡ button in the server list. Bound to 127.0.0.1 only.",
+  "servers.localSocks5Warn":
+    "No username set: any program that can reach 127.0.0.1 may use this proxy.",
+  "servers.socks5DirectStart": "Start the local direct SOCKS5 proxy",
+  "servers.socks5DirectStop":
+    "Stop the local direct SOCKS5 proxy (socks5://127.0.0.1:{port})",
+  "servers.socks5DirectStarted":
+    "Local direct SOCKS5 proxy started: socks5://127.0.0.1:{port}",
+  "servers.socks5DirectStopped": "Local direct SOCKS5 proxy stopped.",
+  "servers.socks5DirectNeedConfig":
+    "Local SOCKS5 proxy not enabled; enable it in the local settings first.",
   "servers.socks5Start": "Start SOCKS5 tunnel",
   "servers.socks5Stop": "Close SOCKS5 tunnel",
   "servers.socks5StopAt": "Close SOCKS5 tunnel (socks5://127.0.0.1:{port})",

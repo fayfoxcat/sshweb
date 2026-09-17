@@ -89,6 +89,15 @@
   let term: Terminal | null = null;
   let fitAddon: FitAddon | null = null;
 
+  /** Whether `term` has been created. `term` itself is a plain `let`, so it is
+   *  invisible to `$effect` — this flag is the reactive signal that says "the
+   *  terminal now exists", and it is what makes the focus effect below fire
+   *  for a terminal that mounts already active (a new tab, or the restored
+   *  terminals after a page reload). Without it the effect only ever ran on an
+   *  `active` transition, which never happens for a freshly opened tab that is
+   *  active from the start — so its keys went nowhere until the user clicked. */
+  let ready = $state(false);
+
   let theme = $derived(themes[$settings.theme]);
   let loaded = $state(false);
 
@@ -113,9 +122,12 @@
     }
   }
 
-  // When this tab becomes active, re-fit now that it is visible and claim
-  // keyboard focus so typing / Ctrl+C / Ctrl+V reach xterm immediately
-  // (xterm only receives keys while its hidden textarea is focused).
+  // When this tab becomes active — or when an already-active tab's terminal
+  // finishes loading — re-fit now that it is visible and claim keyboard focus
+  // so typing / Ctrl+C / Ctrl+V reach xterm immediately (xterm only receives
+  // keys while its hidden textarea is focused). `ready` is what covers the
+  // second case: a tab opened as active is mounted with `active === true`
+  // before `term` exists, so the `active` edge alone would never fire.
   function claimFocus() {
     setTimeout(() => {
       fit();
@@ -124,7 +136,7 @@
   }
 
   $effect(() => {
-    if (term && active) claimFocus();
+    if (ready && active) claimFocus();
   });
 
   onMount(() => {
@@ -293,6 +305,10 @@
     term.onBinary((data: string) => {
       dispatch("data", Buffer.from(data, "binary"));
     });
+
+    // Announce readiness last, so the focus effect sees a fully set-up
+    // terminal (`ready` gates nothing else; it is purely the effect's signal).
+    ready = true;
   });
 </script>
 

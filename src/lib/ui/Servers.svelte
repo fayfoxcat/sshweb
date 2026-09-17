@@ -43,7 +43,9 @@
   import { copyText } from "$lib/clipboard";
   import {
     loadProxies,
+    LOCAL_PROXY_KEY,
     proxies,
+    startLocalProxy,
     startProxy,
     stopProxy,
     type ProxyStatus,
@@ -55,6 +57,7 @@
   import PromptDialog from "./PromptDialog.svelte";
   import JumpAuthInput from "./JumpAuthInput.svelte";
   import StartupSnippet from "./StartupSnippet.svelte";
+  import LocalSettingsDialog from "./LocalSettingsDialog.svelte";
   import Sidebar from "./Sidebar.svelte";
 
   const dispatch = createEventDispatcher<{
@@ -127,6 +130,8 @@
   let keyNameOpen = $state(false);
   let installPwdOpen = $state(false);
   let testing = $state(false);
+  /** 「本机」设置对话框(已知坑 81)。本机没有服务器配置,只有这一份四项设置。 */
+  let localSettingsOpen = $state(false);
 
   /** Basic connection fields. */
   const BASIC_FIELDS: FieldSpec[] = [
@@ -487,6 +492,44 @@
     }
   }
 
+  // ---- 本机直连代理开关(与上面的服务器隧道各自独立) ----------------------
+  // 用独立的 `toggleLocalProxy`/`localProxy`,不把 `proxyOf`/`toggleProxy` 改成
+  // 收 `ServerConfig`：本机根本没有 `ServerConfig`,而那两个是服务器行的热路径。
+  let localProxy = $derived(
+    $proxies.find((p) => p.serverKey === LOCAL_PROXY_KEY),
+  );
+
+  function localProxyDisabled(): boolean {
+    return !$servers.local.socks5Tunnel;
+  }
+
+  async function toggleLocalProxy() {
+    if (localProxyDisabled()) return;
+    if (localProxy) {
+      try {
+        await stopProxy(LOCAL_PROXY_KEY);
+        makeToast({
+          kind: "info",
+          message: t($lang, "servers.socks5DirectStopped"),
+        });
+      } catch (err) {
+        toastError(err);
+      }
+      return;
+    }
+    try {
+      const started = await startLocalProxy($servers.local.socks5Tunnel);
+      makeToast({
+        kind: "success",
+        message: t($lang, "servers.socks5DirectStarted", {
+          port: started.port,
+        }),
+      });
+    } catch (err) {
+      toastError(err);
+    }
+  }
+
   // 面板每次打开时刷新隧道运行状态。
   onMount(() => {
     void loadProxies().catch(() => {});
@@ -563,6 +606,34 @@
           >
             <FolderIcon size="14" />
           </button>
+          <button
+            class="icon-btn-sm"
+            title={t($lang, "servers.localEdit")}
+            onclick={() => (localSettingsOpen = true)}
+          >
+            <EditIcon size="14" />
+          </button>
+          <!-- ⚡ 本机直连 SOCKS5 代理开关 -->
+          <span
+            title={localProxy
+              ? t($lang, "servers.socks5DirectStop", { port: localProxy.port })
+              : localProxyDisabled()
+                ? t($lang, "servers.socks5DirectNeedConfig")
+                : t($lang, "servers.socks5DirectStart")}
+            class="inline-flex"
+          >
+            <button
+              class="icon-btn-sm {localProxyDisabled()
+                ? 'cursor-not-allowed opacity-40'
+                : localProxy
+                  ? '!text-emerald-300 !bg-emerald-900/40 hover:!bg-emerald-900/60'
+                  : ''}"
+              disabled={localProxyDisabled()}
+              onclick={() => toggleLocalProxy()}
+            >
+              <ZapIcon size="14" />
+            </button>
+          </span>
         </div>
       </div>
 
@@ -1067,6 +1138,11 @@
   confirmText={t($lang, "common.delete")}
   on:confirm={confirmDelete}
   on:cancel={() => (deleteTarget = null)}
+/>
+
+<LocalSettingsDialog
+  open={localSettingsOpen}
+  on:close={() => (localSettingsOpen = false)}
 />
 
 <style lang="postcss">

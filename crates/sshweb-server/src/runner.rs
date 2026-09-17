@@ -1,6 +1,8 @@
 //! Asynchronous tasks that run a single shell with process I/O.
 
+use std::collections::VecDeque;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use bytes::Bytes;
@@ -14,7 +16,7 @@ use tracing::{debug, trace};
 use crate::session::Session;
 use crate::ssh;
 use crate::terminal::Terminal;
-use crate::web::protocol::ServerConfig;
+use crate::web::protocol::{LocalSettings, ServerConfig};
 
 /// Internal message routed to shell runners.
 pub enum ShellData {
@@ -34,9 +36,17 @@ pub enum ShellData {
 ///
 /// Reads output from the terminal and stores it in the session, from where it
 /// is streamed to connected browsers. Incoming input is written to the PTY.
+///
+/// `local` carries the 「本机」settings that apply to this shell (已知坑 81):
+/// the terminal encoding and the startup snippet. Both go through exactly the
+/// same helpers the remote path uses, so a setting means the same thing on
+/// either side. The su/prompt scanners stay remote-only — there is no login
+/// over a local PTY, and the working directory is read from `/proc/<pid>/cwd`
+/// (see `Session::pwd_request`) rather than parsed out of a prompt.
 pub async fn shell_task(
     id: Sid,
     shell: String,
+    local: LocalSettings,
     cwd: Option<String>,
     mut shell_rx: mpsc::Receiver<ShellData>,
     session: Arc<Session>,
@@ -48,11 +58,32 @@ pub async fn shell_task(
     // /proc/<pid>/cwd (no terminal echo, unlike injecting a `pwd` command).
     session.set_shell_pid(id, term.pid());
 
+    // Terminal transcoding: only applies to the terminal (file browsing and
+    // downloads are raw byte streams; the editor picks the file's encoding).
+    let mut transcode = Transcode::new(&local.encoding);
+    tracing::debug!(%id, enc = %local.encoding, transcode = transcode.needed(), "local terminal encoding");
+
+    // Startup snippet: typed line by line with the same pacing as the remote
+    // side (已知坑 45 — a whole-snippet write is eaten by readline, which would
+    // strand an interactive `su` password prompt).
+    let mut injector = SnippetInjector::new(&local.startup);
+    let mut injecting = injector.is_some();
+
     let mut buf = [0u8; 4096];
     let mut finished = false;
 
     while !finished {
         tokio::select! {
+            line = async { injector.as_mut().expect("guarded by `injecting`").next_line().await }, if injecting => {
+                match line {
+                    Some(line) => {
+                        if let Err(err) = term.write_all(format!("{line}\r").as_bytes()).await {
+                            debug!(%id, ?err, "failed to send startup snippet line");
+                        }
+                    }
+                    None => injecting = false,
+                }
+            }
             result = term.read(&mut buf) => {
                 // The PTY returns EIO when the shell's session leader exits.
                 let n = match result {
@@ -68,14 +99,20 @@ pub async fn shell_task(
                 if n == 0 {
                     finished = true;
                 } else {
-                    session.add_data(id, vec![Bytes::copy_from_slice(&buf[..n])])?;
+                    match transcode.decode(&buf[..n]) {
+                        // Transcoded: hand the UTF-8 text on.
+                        Some(text) => session.add_data(id, vec![Bytes::from(text.into_bytes())])?,
+                        // UTF-8 shell: pass the **original** bytes through.
+                        None => session.add_data(id, vec![Bytes::copy_from_slice(&buf[..n])])?,
+                    }
                 }
             }
             item = shell_rx.recv() => {
                 match item {
-                    Some(ShellData::Data(data)) => {
-                        term.write_all(&data).await?;
-                    }
+                    Some(ShellData::Data(data)) => match transcode.encode(&data) {
+                        Some(out) => term.write_all(&out).await?,
+                        None => term.write_all(&data).await?,
+                    },
                     Some(ShellData::Size(rows, cols)) => {
                         term.set_winsize(rows as u16, cols as u16)?;
                     }
@@ -172,20 +209,12 @@ pub async fn ssh_task(
     // commands (`su - root` + password) work. A whole-snippet write fails
     // because the shell's readline consumes the buffered lines, leaving the
     // `su` password prompt with an empty tty buffer.
-    let mut inject_lines: std::collections::VecDeque<String> =
-        startup_snippet_lines(&server.startup)
-            .unwrap_or_default()
-            .into();
-    let mut inject_deadline = tokio::time::Instant::now();
-    let mut last_was_switch = false;
-    let mut injecting = !inject_lines.is_empty();
+    let mut injector = SnippetInjector::new(&server.startup);
+    let mut injecting = injector.is_some();
 
     // Encoding transcoding (if not UTF-8).
-    let encoding = encoding_rs::Encoding::for_label(server.encoding.as_bytes());
-    let needs_transcode = encoding.map(|e| e != encoding_rs::UTF_8).unwrap_or(false);
-    let mut decoder = encoding.map(|e| e.new_decoder());
-    let mut encoder = encoding.map(|e| e.new_encoder());
-    tracing::debug!(%id, enc = %server.encoding, transcode = needs_transcode, "terminal encoding");
+    let mut transcode = Transcode::new(&server.encoding);
+    tracing::debug!(%id, enc = %server.encoding, transcode = transcode.needed(), "terminal encoding");
 
     // Zero-intrusion `su` detection: watch the terminal output for an
     // interactive `su`/`sudo` command echo followed by a `Password:` prompt.
@@ -202,48 +231,38 @@ pub async fn ssh_task(
     let mut finished = false;
     while !finished {
         tokio::select! {
-            _ = tokio::time::sleep_until(inject_deadline), if injecting => {
-                if let Some(line) = inject_lines.pop_front() {
-                    let body = format!("{line}\r");
-                    if let Err(err) = write_half.data(body.as_bytes()).await {
-                        debug!(%id, ?err, "failed to send startup snippet line");
+            line = async { injector.as_mut().expect("guarded by `injecting`").next_line().await }, if injecting => {
+                match line {
+                    Some(line) => {
+                        let body = format!("{line}\r");
+                        if let Err(err) = write_half.data(body.as_bytes()).await {
+                            debug!(%id, ?err, "failed to send startup snippet line");
+                        }
                     }
-                    // After a user-switch command wait briefly, then send the
-                    // password; after any other line wait a short beat so the
-                    // previous command is fully processed.
-                    let is_switch = user_switch_line(&line).is_some();
-                    let gap = if is_switch {
-                        std::time::Duration::from_millis(250)
-                    } else if last_was_switch {
-                        std::time::Duration::from_millis(1000)
-                    } else {
-                        std::time::Duration::from_millis(350)
-                    };
-                    last_was_switch = is_switch;
-                    inject_deadline = tokio::time::Instant::now() + gap;
-                } else {
-                    injecting = false;
+                    None => injecting = false,
                 }
             }
             msg = read_half.wait() => {
                 match crate::ssh::channel_event(msg) {
                     crate::ssh::ChannelEvent::Data(data) => {
-                        if needs_transcode {
-                            let decoder = decoder.as_mut().unwrap();
-                            let mut text = String::new();
-                            let _ = decoder.decode_to_string(&data, &mut text, false);
-                            scan_su_output(id, &text, &mut su_pending, &mut su_line_buf, &session);
-                            if let Some(cwd) = feed_prompt_cwd(&mut prompt_buf, &text) {
-                                last_cwd = Some(cwd);
+                        match transcode.decode(&data) {
+                            Some(text) => {
+                                scan_su_output(id, &text, &mut su_pending, &mut su_line_buf, &session);
+                                if let Some(cwd) = feed_prompt_cwd(&mut prompt_buf, &text) {
+                                    last_cwd = Some(cwd);
+                                }
+                                session.add_data(id, vec![Bytes::from(text.into_bytes())])?;
                             }
-                            session.add_data(id, vec![Bytes::from(text.into_bytes())])?;
-                        } else {
-                            let text = String::from_utf8_lossy(&data).into_owned();
-                            if let Some(cwd) = feed_prompt_cwd(&mut prompt_buf, &text) {
-                                last_cwd = Some(cwd);
+                            None => {
+                                // Not transcoding: pass the original bytes
+                                // through; only the scan/parse view is lossy.
+                                let text = String::from_utf8_lossy(&data);
+                                scan_su_output(id, &text, &mut su_pending, &mut su_line_buf, &session);
+                                if let Some(cwd) = feed_prompt_cwd(&mut prompt_buf, &text) {
+                                    last_cwd = Some(cwd);
+                                }
+                                session.add_data(id, vec![data])?;
                             }
-                            session.add_data(id, vec![data])?;
-                            scan_su_output(id, &text, &mut su_pending, &mut su_line_buf, &session);
                         }
                     }
                     crate::ssh::ChannelEvent::Eof | crate::ssh::ChannelEvent::Closed => {
@@ -254,20 +273,10 @@ pub async fn ssh_task(
             }
             item = shell_rx.recv() => {
                 match item {
-                    Some(ShellData::Data(data)) => {
-                        if needs_transcode {
-                            let encoder = encoder.as_mut().unwrap();
-                            let mut out = Vec::new();
-                            let _ = encoder.encode_from_utf8_without_replacement(
-                                std::str::from_utf8(&data).unwrap_or(""),
-                                &mut out,
-                                false,
-                            );
-                            write_half.data(&out[..]).await?;
-                        } else {
-                            write_half.data(&data[..]).await?;
-                        }
-                    }
+                    Some(ShellData::Data(data)) => match transcode.encode(&data) {
+                        Some(out) => write_half.data(&out[..]).await?,
+                        None => write_half.data(&data[..]).await?,
+                    },
                     Some(ShellData::Size(rows, cols)) => {
                         write_half.window_change(cols, rows, 0, 0).await?;
                     }
@@ -304,6 +313,137 @@ fn startup_snippet_lines(snippet: &str) -> Option<Vec<String>> {
         None
     } else {
         Some(lines)
+    }
+}
+
+/// Types a startup snippet into a freshly started shell, one line at a time,
+/// with the pacing interactive commands need (已知坑 45).
+///
+/// The pace is measured from the **previous** line: a user-switch command
+/// (`su - root`) is followed by a short beat so the password can go in, the
+/// password line is followed by a long one so `su` has finished, and ordinary
+/// lines get a plain short beat. Writing the whole snippet at once does not
+/// work — the shell's readline consumes the buffered lines and the `su`
+/// password prompt ends up with an empty tty buffer.
+struct SnippetInjector {
+    lines: VecDeque<String>,
+    /// When the next line may be typed.
+    deadline: tokio::time::Instant,
+    /// Whether the previously injected line was a user-switch command.
+    last_was_switch: bool,
+}
+
+impl SnippetInjector {
+    /// Build an injector for `snippet`, or `None` when there is nothing to
+    /// type.
+    pub fn new(snippet: &str) -> Option<Self> {
+        let lines: VecDeque<String> = startup_snippet_lines(snippet)?.into();
+        Some(Self {
+            lines,
+            deadline: tokio::time::Instant::now(),
+            last_was_switch: false,
+        })
+    }
+
+    /// The next line to type, after waiting out its pacing delay. `None` once
+    /// the snippet is exhausted.
+    ///
+    /// **Cancel-safe**: the queue is only popped *after* the sleep has
+    /// completed, so losing a `select!` race to terminal traffic can delay a
+    /// line but can never drop one.
+    pub async fn next_line(&mut self) -> Option<String> {
+        tokio::time::sleep_until(self.deadline).await;
+        let line = self.lines.pop_front()?;
+        let is_switch = user_switch_line(&line).is_some();
+        let gap = if is_switch {
+            Duration::from_millis(250)
+        } else if self.last_was_switch {
+            Duration::from_millis(1000)
+        } else {
+            Duration::from_millis(350)
+        };
+        self.last_was_switch = is_switch;
+        self.deadline = tokio::time::Instant::now() + gap;
+        Some(line)
+    }
+}
+
+/// Terminal transcoding for a shell whose encoding is not UTF-8: decodes shell
+/// output for the browser (which always speaks UTF-8) and re-encodes typed
+/// input back to the shell's encoding.
+///
+/// The decoder is **persistent across reads** on purpose: a multi-byte
+/// character can be split across two PTY/channel reads, and only a stateful
+/// decoder carries the partial sequence over — decoding each chunk
+/// independently would corrupt it into replacement characters.
+pub struct Transcode {
+    decoder: Option<encoding_rs::Decoder>,
+    encoder: Option<encoding_rs::Encoder>,
+}
+
+impl Transcode {
+    /// Build a transcoder for `encoding`. An unknown label falls back to the
+    /// UTF-8 fast path, matching the previous behavior.
+    pub fn new(encoding: &str) -> Self {
+        match encoding_rs::Encoding::for_label(encoding.as_bytes()) {
+            Some(enc) if enc != encoding_rs::UTF_8 => Self {
+                decoder: Some(enc.new_decoder()),
+                encoder: Some(enc.new_encoder()),
+            },
+            _ => Self {
+                decoder: None,
+                encoder: None,
+            },
+        }
+    }
+
+    /// Whether any transcoding is configured (`false` = the fast path, where
+    /// bytes must be passed through untouched).
+    pub fn needed(&self) -> bool {
+        self.decoder.is_some()
+    }
+
+    /// Decode one output chunk to UTF-8. `None` means the shell is UTF-8: the
+    /// caller must forward the **original bytes** (a lossy string view is only
+    /// good for scanning/parsing) and do no transcoding at all.
+    pub fn decode(&mut self, data: &[u8]) -> Option<String> {
+        let decoder = self.decoder.as_mut()?;
+        let mut text = String::new();
+        // `decode_to_string` writes only into the string's **existing
+        // capacity** and never grows it, so the obvious `String::new()` handed
+        // it a zero-length buffer and every decoded chunk came back empty — a
+        // non-UTF-8 terminal showed nothing at all. Reserve the worst case
+        // first (已知坑 85).
+        text.reserve(
+            decoder
+                .max_utf8_buffer_length(data.len())
+                .unwrap_or(0)
+                .max(data.len() * 4)
+                + 8,
+        );
+        let _ = decoder.decode_to_string(data, &mut text, false);
+        Some(text)
+    }
+
+    /// Encode browser input back to the shell's encoding. `None` means the
+    /// bytes are already what the shell wants and must be written as-is.
+    pub fn encode(&mut self, data: &[u8]) -> Option<Vec<u8>> {
+        let encoder = self.encoder.as_mut()?;
+        let src = std::str::from_utf8(data).unwrap_or("");
+        let mut out = Vec::new();
+        // Same trap as `decode`: the `…_to_vec_…` variant writes into the vec's
+        // existing capacity only, so a fresh `Vec` swallowed the whole input —
+        // every keystroke vanished on a non-UTF-8 remote (已知坑 85). Reserve
+        // the worst case first (unmappable characters become NCRs).
+        out.reserve(
+            encoder
+                .max_buffer_length_from_utf8_if_no_unmappables(src.len())
+                .unwrap_or(0)
+                .max(src.len() * 4)
+                + 8,
+        );
+        let _ = encoder.encode_from_utf8_to_vec_without_replacement(src, &mut out, false);
+        Some(out)
     }
 }
 
@@ -517,7 +657,7 @@ fn extract_prompt_cwd(line: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{switch_user_from_tokens, user_switch_line};
+    use super::{switch_user_from_tokens, user_switch_line, SnippetInjector, Transcode};
 
     #[test]
     fn user_switch_line_matches_command_forms() {
@@ -571,5 +711,60 @@ mod tests {
             Some("alice")
         );
         assert_eq!(switch_user_from_tokens(&tokens("ls")), None);
+    }
+
+    /// The injector types every non-comment line, in order, then stops.
+    /// `start_paused` makes the pacing sleeps resolve instantly.
+    #[tokio::test(start_paused = true)]
+    async fn snippet_injector_yields_lines_in_order() {
+        let mut injector = SnippetInjector::new("export FOO=bar\n# a comment\n\ncd /tmp").unwrap();
+        assert_eq!(
+            injector.next_line().await.as_deref(),
+            Some("export FOO=bar")
+        );
+        assert_eq!(injector.next_line().await.as_deref(), Some("cd /tmp"));
+        assert_eq!(injector.next_line().await, None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn snippet_injector_is_none_when_nothing_to_type() {
+        assert!(SnippetInjector::new("").is_none());
+        assert!(SnippetInjector::new("   \n\n").is_none());
+        assert!(SnippetInjector::new("# only a comment").is_none());
+    }
+
+    /// GBK text survives an encode → decode round trip.
+    #[test]
+    fn transcode_round_trips_gbk() {
+        let mut transcode = Transcode::new("gbk");
+        assert!(transcode.needed());
+        let bytes = transcode.encode("你好".as_bytes()).unwrap();
+        // GBK is not UTF-8: the two must actually differ for this to be a test.
+        assert_ne!(bytes, "你好".as_bytes());
+        assert_eq!(transcode.decode(&bytes).unwrap(), "你好");
+    }
+
+    /// A multi-byte character split across two reads must survive: this is why
+    /// the decoder is kept across chunks instead of being rebuilt per read.
+    #[test]
+    fn transcode_keeps_partial_multibyte_sequences() {
+        let mut transcode = Transcode::new("gbk");
+        let bytes = transcode.encode("你好".as_bytes()).unwrap();
+        assert_eq!(bytes.len(), 4);
+        let (head, tail) = bytes.split_at(3);
+        assert_eq!(transcode.decode(head).unwrap(), "你");
+        assert_eq!(transcode.decode(tail).unwrap(), "好");
+    }
+
+    /// UTF-8 (and an unknown label) must take the no-transcoding fast path so
+    /// the caller passes raw bytes through.
+    #[test]
+    fn transcode_is_a_no_op_for_utf8() {
+        for label in ["utf-8", "UTF-8", "not-an-encoding"] {
+            let mut transcode = Transcode::new(label);
+            assert!(!transcode.needed(), "label {label}");
+            assert!(transcode.decode(b"hi").is_none(), "label {label}");
+            assert!(transcode.encode(b"hi").is_none(), "label {label}");
+        }
     }
 }

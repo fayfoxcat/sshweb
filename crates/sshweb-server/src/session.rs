@@ -29,7 +29,7 @@ use tracing::{debug, warn};
 use crate::config::ConfigStore;
 use crate::runner::{shell_task, ssh_task, ShellData};
 use crate::sftp::SftpPool;
-use crate::utils::Shutdown;
+use crate::utils::{self, Shutdown};
 use crate::web::protocol::{ServerConfig, WsServer, WsWinsize};
 
 /// Per-connection outbound queue capacity (坑 13: bounded, non-blocking sends).
@@ -604,6 +604,14 @@ impl Session {
         if self.shells.read().len() >= MAX_SHELLS_PER_SESSION {
             bail!("终端数量已达上限（{MAX_SHELLS_PER_SESSION}）");
         }
+        // 本机终端的起始目录:前端对本机一律发 `null`,由本机设置兜底(已知坑 81)。
+        // 远程不动——它的启动目录由前端算出,`~` 交给远程登录 shell 自己展开。
+        let local = self.config.local_settings();
+        let cwd = if server.is_none() {
+            utils::resolve_local_start_dir(cwd.as_deref(), &local.home)
+        } else {
+            cwd
+        };
         let (id, input_rx) = self.insert_shell(server.clone(), false, cwd.clone(), label);
         // The first shell becomes the active tab (later switches are driven by
         // the client's `setActive`).
@@ -618,7 +626,17 @@ impl Session {
         tokio::spawn(async move {
             let result = match server {
                 Some(server) => ssh_task(id, server, cwd, input_rx, Arc::clone(&session)).await,
-                None => shell_task(id, shell_command, cwd, input_rx, Arc::clone(&session)).await,
+                None => {
+                    shell_task(
+                        id,
+                        shell_command,
+                        local,
+                        cwd,
+                        input_rx,
+                        Arc::clone(&session),
+                    )
+                    .await
+                }
             };
             if let Err(err) = result {
                 debug!(%id, ?err, "shell task exited with error");

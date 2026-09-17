@@ -175,7 +175,7 @@ pub struct SftpEntry {
 
 /// SOCKS5 隧道偏好（入站代理到远程内网）:持久化在服务器配置中,运行时监听由
 /// `ProxyRegistry`（proxy.rs）管理。
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Socks5Tunnel {
     /// 本地监听端口偏好(0 = 自动分配,从 10801 起)。
@@ -187,6 +187,51 @@ pub struct Socks5Tunnel {
     /// SOCKS5 认证密码(可选;`username` 非空时生效)。
     #[serde(default)]
     pub password: String,
+}
+
+/// 「本机」条目的设置:服务器面板里那一行硬编码的本机(终端与文件浏览器都跑在
+/// sshweb 自己这台机器上)。持久化在加密配置的 `ServerSettings.local`,由服务端
+/// 在**创建本地 shell / 打开本机 SFTP** 时读取——前端对本机始终发 `null`
+/// (`serverTargetKey(null) === "local"`),所以这里不需要任何新的 WS 消息。
+///
+/// 只有这四项:本机没有主机、端口、用户名、认证方式可配。
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalSettings {
+    /// Commands typed into a new local terminal once it starts (one per line,
+    /// executed in order as if typed) — same semantics as
+    /// [`ServerConfig::startup`].
+    #[serde(default)]
+    pub startup: String,
+    /// Terminal encoding for local shell output/input (transcoded exactly like
+    /// a remote `ServerConfig::encoding`). Defaults to UTF-8.
+    #[serde(default = "default_encoding")]
+    pub encoding: String,
+    /// 家目录:新建本地终端与「本机文件系统」的默认起始目录。留空 = 保持原行为
+    /// (终端用 sshweb 进程的工作目录,文件浏览用 `current_dir()`)。支持 `~` 与
+    /// 相对路径(以 `$HOME` 为基准,与 [`ServerConfig::startup_dir`] 的规则一致);
+    /// 路径不存在时忽略并记一条警告(见 `utils::resolve_local_start_dir`)。
+    #[serde(default)]
+    pub home: String,
+    /// SOCKS5 直连代理偏好(监听本机端口、入站连接直接连目标,不走 SSH)。
+    /// 缺省 = 不开启。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub socks5_tunnel: Option<Socks5Tunnel>,
+}
+
+impl Default for LocalSettings {
+    /// 手写而非 `derive`:`#[serde(default = "default_encoding")]`
+    /// 在缺字段时给出 `"utf-8"`,而 derive 的 `Default` 只会给
+    /// `""`——新建配置走的是 `ServerSettings::default()`,
+    /// 两份默认值分叉会让前端编码下拉框显示空。
+    fn default() -> Self {
+        Self {
+            startup: String::new(),
+            encoding: default_encoding(),
+            home: String::new(),
+            socks5_tunnel: None,
+        }
+    }
 }
 
 /// Remote SSH server connection parameters.

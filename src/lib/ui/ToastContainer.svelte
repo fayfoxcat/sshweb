@@ -1,4 +1,5 @@
 <svelte:options runes={true} />
+
 <script lang="ts">
   import { onMount } from "svelte";
   import { flip } from "svelte/animate";
@@ -30,10 +31,7 @@
           transition:fly={{ x: 360, duration: 500 }}
         >
           <Toast
-            kind={toast.kind}
-            message={toast.message}
-            action={toast.action}
-            onAction={toast.onAction ?? (() => null)}
+            {toast}
             onDismiss={() =>
               ($toastStore = $toastStore.filter((t) => t !== toast))}
           />

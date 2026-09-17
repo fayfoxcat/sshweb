@@ -128,6 +128,12 @@ fn backend() -> Router<Arc<ServerState>> {
             get(proxies::list_proxies).post(proxies::start_proxy),
         )
         .route(
+            // DELETE 必须挂在这一条静态路径上:参数路由 `/proxies/{server_key}`
+            // 兜不住同段的静态路径,只会回 405(已知坑 86)。
+            "/proxies/local",
+            axum::routing::post(proxies::start_local_proxy).delete(proxies::stop_local_proxy),
+        )
+        .route(
             "/proxies/{server_key}",
             axum::routing::delete(proxies::stop_proxy),
         )
@@ -277,4 +283,59 @@ async fn get_stats(
         time: stats.now(),
     })
     .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    use super::{app, ServerState};
+    use crate::ServerOptions;
+
+    /// 路由表契约(已知坑 86):同一段上**静态路径优先于参数路径**,所以
+    /// `/proxies/local` 与 `/proxies/{server_key}` 必须各自挂全自己的方法。
+    /// 只挂 POST 时,`DELETE /api/proxies/local` 会得到 405(`allow: POST`)而
+    /// 不回落——前端把它读成「服务端返回了无效响应」,本机代理就关不掉了。
+    ///
+    /// 未带 cookie,因此这三条为真的断言都是 401(鉴权闸门先响):拿到 405
+    /// 就说明路由根本没挂上。
+    #[tokio::test]
+    async fn proxy_stop_routes_reach_their_handlers() {
+        let dir = std::env::temp_dir().join(format!("sshweb-routes-{}", std::process::id()));
+        let options = ServerOptions {
+            config_path: Some(dir.join("config.enc")),
+            ..Default::default()
+        };
+        let router = app().with_state(Arc::new(ServerState::new(options).unwrap()));
+
+        for (method, path) in [
+            ("DELETE", "/api/proxies/local"),
+            ("POST", "/api/proxies/local"),
+            ("DELETE", "/api/proxies/nobody%40host%3A22"),
+        ] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(path)
+                        // `Json` 提取器先于 handler 校验请求体:空体 + 无
+                        // content-type 会得到 415,而不是我们想看的 401。
+                        .header(axum::http::header::CONTENT_TYPE, "application/json")
+                        .body(Body::from("{}"))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{method} {path} 应进入 handler(401),拿到 405 说明方法没挂在这个路径上"
+            );
+        }
+    }
 }

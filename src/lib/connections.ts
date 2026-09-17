@@ -34,11 +34,50 @@ export type ServerInput = Omit<ServerConfig, "id"> & {
   keyId: string | null;
 };
 
-export type ServerSettings = {
-  servers: ServerConfig[];
+/** 服务器面板里「本机」那一行的设置（已知坑 81）。它是**服务端**状态：终端与
+ *  文件浏览器都跑在 sshweb 那台机器上，所以家目录必须是服务端路径，配置也持久化
+ *  在服务端的加密配置里（`ServerSettings.local`）——前端只是编辑与回送它。 */
+export type LocalSettings = {
+  /** 启动命令：新建本地终端后逐行"敲"进去的片段（与服务器的 `startup` 同义）。 */
+  startup: string;
+  /** 终端编码（与服务器的 `encoding` 同义；本机终端输出/输入的转码）。 */
+  encoding: string;
+  /** 家目录：新建本地终端与「本机文件系统」的默认起始目录。空 = 现状
+   *  （终端用服务端进程的工作目录，文件浏览用其 `current_dir()`）。 */
+  home: string;
+  /** SOCKS5 直连代理偏好（本机端口，不走 SSH）。缺省 = 不开启。 */
+  socks5Tunnel?: WsSocks5Tunnel;
 };
 
-const serverStore = writable<ServerSettings>({ servers: [] });
+export type ServerSettings = {
+  servers: ServerConfig[];
+  local: LocalSettings;
+};
+
+/** A blank 「本机」设置，matching the server's own defaults. */
+export function defaultLocalSettings(): LocalSettings {
+  return { startup: "", encoding: "utf-8", home: "", socks5Tunnel: undefined };
+}
+
+/** Normalize a partial (or absent) local-settings shape from the API. */
+function localSettings(values?: {
+  startup?: string;
+  encoding?: string;
+  home?: string;
+  socks5Tunnel?: WsSocks5Tunnel;
+}): LocalSettings {
+  return {
+    startup: values?.startup ?? "",
+    encoding: values?.encoding || "utf-8",
+    home: values?.home ?? "",
+    socks5Tunnel: values?.socks5Tunnel ?? undefined,
+  };
+}
+
+const serverStore = writable<ServerSettings>({
+  servers: [],
+  local: defaultLocalSettings(),
+});
 
 /** Authenticated server configurations. No SSH secrets are persisted in the browser. */
 export const servers = serverStore;
@@ -177,13 +216,21 @@ export function effectivePassword(inputPwd: string, savedPwd: string): string {
   return inputPwd || savedPwd;
 }
 
-function normalizeSettings(value: {
+/** The shape `GET /api/config` (and `/api/config/import`) answers with: the
+ *  persisted sections, tolerantly typed because the caller normalizes them. */
+type SettingsPayload = {
   servers?: Array<WsServerConfig & { id: string }>;
-}): ServerSettings {
+  local?: Parameters<typeof localSettings>[0];
+};
+
+/** Normalize the settings payload from the API. Every section the store holds
+ *  must be carried through here — this rebuilds the whole object, so a section
+ *  left out is silently dropped from the store (已知坑 81). */
+function normalizeSettings(value: SettingsPayload): ServerSettings {
   const configs = Array.isArray(value.servers)
     ? value.servers.map(serverConfig)
     : [];
-  return { servers: configs };
+  return { servers: configs, local: localSettings(value.local) };
 }
 
 async function persist(next: ServerSettings): Promise<void> {
@@ -201,9 +248,7 @@ async function persist(next: ServerSettings): Promise<void> {
  *  decrypted and imported via `/api/config/import` before the key is cleared.
  *  Otherwise the server-side settings are used as-is. */
 export async function loadServers(): Promise<void> {
-  const remote = await request<{
-    servers?: Array<WsServerConfig & { id: string }>;
-  }>("/api/config");
+  const remote = await request<SettingsPayload>("/api/config");
   if (remote.servers?.length) {
     clearLegacyServers();
     serverStore.set(normalizeSettings(remote));
@@ -211,9 +256,7 @@ export async function loadServers(): Promise<void> {
   }
   const legacy = await readLegacyServers();
   if (legacy) {
-    const imported = await request<{
-      servers?: Array<WsServerConfig & { id: string }>;
-    }>("/api/config/import", {
+    const imported = await request<SettingsPayload>("/api/config/import", {
       method: "POST",
       body: JSON.stringify({
         servers: legacy.map((s) => serverConfig({ ...s })),
@@ -223,8 +266,13 @@ export async function loadServers(): Promise<void> {
     serverStore.set(normalizeSettings(imported));
     return;
   }
-  // No remote servers and no legacy store: leave the (already-empty) store.
+  // No remote servers and no legacy store: the (already-empty) server list is
+  // correct, but the store must still adopt the payload — it also carries the
+  // 「本机」设置, which would otherwise stay at its defaults on an instance with
+  // no servers at all (i.e. exactly the fresh install that configures them
+  // first). See 已知坑 81.
   clearLegacyServers();
+  serverStore.set(normalizeSettings(remote));
 }
 
 /** Add and persist a server configuration. */
@@ -275,8 +323,16 @@ export async function updateServer(
 export async function deleteServer(id: string): Promise<void> {
   const current = get(serverStore);
   await persist({
+    ...current,
     servers: current.servers.filter((server) => server.id !== id),
   });
+}
+
+/** Replace the 「本机」设置. The full store (servers included) is sent back so
+ *  the server-side partial merge keeps both sections intact (已知坑 81). */
+export async function updateLocalSettings(local: LocalSettings): Promise<void> {
+  const current = get(serverStore);
+  await persist({ ...current, local });
 }
 
 /** Duplicate a server, appending a visible copy suffix. */
