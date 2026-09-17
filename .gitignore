@@ -16,3 +16,6 @@ Thumbs.db
 
 # Vite 临时配置产物
 vite.config.*.timestamp-*.mjs
+
+# 一次性测试脚手架与门禁的行尾归一化副本(见 开发记录文档.md §六 测试台;不做版本管理,用完可删)
+/.doc/
