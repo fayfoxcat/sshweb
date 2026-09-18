@@ -1,9 +1,15 @@
 /**
  * Icon shim: keeps the old `svelte-feather-icons` component names (`ServerIcon`,
- * `XIcon`, …) but backs them with `lucide-svelte` (feather's maintained
+ * `XIcon`, …) but backs them with `@lucide/svelte` (feather's maintained
  * successor, same stroke style). Lucide v1 renamed 7 feather-era names and
  * dropped their aliases, so those map to the new canonical icon below. Callers
  * only change their import source (from "svelte-feather-icons" to "$lib/icons").
+ *
+ * `@lucide/svelte` is the renamed home of `lucide-svelte` (npm-deprecated at
+ * 1.0.1); the icon names and props are unchanged, so this file is the only
+ * place that needed the new specifier — and, because every other module imports
+ * from here rather than the barrel, the only place that decides what gets
+ * tree-shaken into the bundle.
  */
 import {
   Archive,
@@ -54,7 +60,7 @@ import {
   Video,
   X,
   Zap,
-} from "lucide-svelte";
+} from "@lucide/svelte";
 
 export {
   Archive as ArchiveIcon,

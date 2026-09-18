@@ -758,7 +758,7 @@ impl Session {
         paths: Vec<String>,
         flat: bool,
     ) -> Result<impl futures_util::Stream<Item = Result<Bytes, anyhow::Error>>, anyhow::Error> {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         match self.shell_target(id) {
             Some((server, pool)) => {
                 let err_tx = tx.clone();
@@ -780,6 +780,10 @@ impl Session {
                 });
             }
         }
-        Ok(tokio_stream::wrappers::UnboundedReceiverStream::new(rx))
+        // `mpsc::UnboundedReceiver` is not a `Stream` (it only offers
+        // `async recv`), so adapt it with `poll_fn` over the public
+        // `poll_recv`. This is what `tokio_stream::wrappers` would do, without
+        // the extra direct dependency for a single call site.
+        Ok(futures_util::stream::poll_fn(move |cx| rx.poll_recv(cx)))
     }
 }

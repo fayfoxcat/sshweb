@@ -1,10 +1,42 @@
 @font-face {
     font-family: "Fira Code VF";
-    src: url("firacode/distr/woff2/FiraCode-VF.woff2") format("woff2-variations"),
-    url("firacode/distr/woff/FiraCode-VF.woff") format("woff-variations");
+    /* woff2 only: the woff fallback is for IE11-era browsers, and because
+       `build/` is embedded verbatim it cost 139 KB of the shipped binary that
+       no browser would ever download. */
+    src: url("firacode/distr/woff2/FiraCode-VF.woff2") format("woff2-variations");
     /* font-weight requires a range: https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_Fonts/Variable_Fonts_Guide#Using_a_variable_font_font-face_changes */
     font-weight: 300 700;
     font-style: normal;
+}
+
+/* Inter (UI font), latin + latin-ext only.
+   Importing `@fontsource-variable/inter` pulls in its whole `index.css`: seven
+   `@font-face` blocks, so seven woff2 files land in `build/` and — since
+   `build/` is embedded verbatim — in the shipped binary. Cyrillic, Greek and
+   Vietnamese are dead weight here (a Chinese UI also never asks for them, and
+   `unicode-range` only keeps the *browser* from fetching them, not the
+   binary from carrying them: ~86 KB). Declaring just these two keeps
+   Western/Central-European diacritics working. */
+@font-face {
+    font-family: "Inter Variable";
+    font-style: normal;
+    font-display: swap;
+    font-weight: 100 900;
+    src: url("@fontsource-variable/inter/files/inter-latin-wght-normal.woff2")
+        format("woff2-variations");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+        U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC,
+        U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+    font-family: "Inter Variable";
+    font-style: normal;
+    font-display: swap;
+    font-weight: 100 900;
+    src: url("@fontsource-variable/inter/files/inter-latin-ext-wght-normal.woff2")
+        format("woff2-variations");
+    unicode-range: U+0100-02AF, U+0304, U+0308, U+0329, U+1E00-1E9F, U+1EF2-1EFF,
+        U+2020, U+20A0-20AB, U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
 @tailwind base;

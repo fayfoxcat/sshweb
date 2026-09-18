@@ -2,6 +2,16 @@
   "extends": "./.svelte-kit/tsconfig.json",
   "compilerOptions": {
     "strict": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    // A `paths` object replaces, rather than merges with, the one svelte-kit
+    // generates — so the kit aliases have to be repeated here. The extra entry
+    // points `@xterm/xterm` at the sshx-xterm kernel's declarations; see
+    // src/types/xterm-kernel.d.ts for why.
+    "paths": {
+      "$lib": ["./src/lib"],
+      "$lib/*": ["./src/lib/*"],
+      "$app/types": ["./.svelte-kit/types/index.d.ts"],
+      "@xterm/xterm": ["./src/types/xterm-kernel.d.ts"]
+    }
   }
 }

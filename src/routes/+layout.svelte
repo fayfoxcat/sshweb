@@ -1,8 +1,8 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
 
-  import "@fontsource-variable/inter";
-
+  // The Inter `@font-face` blocks live in `app.css` (latin + latin-ext only);
+  // importing `@fontsource-variable/inter` here would ship all seven subsets.
   import "sshx-xterm/css/xterm.css";
   import "../app.css";
 

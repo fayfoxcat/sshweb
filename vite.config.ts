@@ -18,6 +18,13 @@ export default defineConfig({
 
   plugins: [sveltekit()],
 
+  // `lucide-svelte` banners every icon module with its ISC notice, and the
+  // default `inline` mode keeps a full copy in each chunk: 48 icons = 172 KB,
+  // ~8.4% of the JS bundle (and 172 KB of the binary too, since `build/` is
+  // embedded verbatim). This is a private internal app whose bundle is only
+  // ever served to its own users, so drop the per-chunk banners.
+  esbuild: { legalComments: "none" },
+
   server: {
     proxy: {
       "/api": {

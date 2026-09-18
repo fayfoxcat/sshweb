@@ -5,16 +5,16 @@
 //! client peer address is carried in the local `PeerInfo` connect-info type so
 //! the auth rate limiter (`ConnectInfo<PeerInfo>`) works on both paths.
 
-use std::fs::File;
-use std::io::BufReader;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use axum::extract::connect_info::Connected;
 use axum::serve::{IncomingStream, Listener};
 use rustls::ServerConfig;
+use rustls_pki_types::pem::PemObject;
+use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use tokio::net::TcpListener as TokioTcpListener;
 use tokio_rustls::server::TlsStream;
 use tokio_rustls::TlsAcceptor;
@@ -26,17 +26,18 @@ use tokio_rustls::TlsAcceptor;
 pub struct PeerInfo(pub SocketAddr);
 
 /// Load a rustls server config from PEM certificate and private key files.
+///
+/// PEM parsing comes from `rustls-pki-types` itself (upstream retired the
+/// separate `rustls-pemfile` crate into it); `PemObject` handles every private
+/// key encoding rustls accepts (PKCS#1 / PKCS#8 / SEC1), so no manual
+/// `BufReader` juggling is needed.
 pub fn load_server_config(cert_path: &Path, key_path: &Path) -> Result<ServerConfig> {
-    let certs = rustls_pemfile::certs(&mut BufReader::new(
-        File::open(cert_path).with_context(|| format!("open TLS cert {}", cert_path.display()))?,
-    ))
-    .collect::<std::result::Result<Vec<_>, _>>()
-    .context("parse TLS certificate")?;
-    let key = rustls_pemfile::private_key(&mut BufReader::new(
-        File::open(key_path).with_context(|| format!("open TLS key {}", key_path.display()))?,
-    ))
-    .context("parse TLS private key")?
-    .ok_or_else(|| anyhow!("no private key found in {}", key_path.display()))?;
+    let certs = CertificateDer::pem_file_iter(cert_path)
+        .with_context(|| format!("open TLS cert {}", cert_path.display()))?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context("parse TLS certificate")?;
+    let key = PrivateKeyDer::from_pem_file(key_path)
+        .with_context(|| format!("parse TLS private key {}", key_path.display()))?;
     // Use the ring provider explicitly (no reliance on a process-default
     // provider having been installed; ring is already a dependency via russh).
     let provider = Arc::new(rustls::crypto::ring::default_provider());
