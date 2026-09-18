@@ -15,6 +15,16 @@ export const AUTH_PROBE_THROTTLE_MS = 5000;
 /** Default terminal scrollback lines. */
 export const DEFAULT_SCROLLBACK = 5000;
 
+/** Terminal font size (px) and the range the settings UI accepts.
+ *
+ *  xterm requires a positive size, and the character cell is measured from it,
+ *  so the range also bounds how much of the pane a single row can take. The
+ *  default is the value the terminal shipped with before the setting existed,
+ *  so an existing user sees no change until they touch it. */
+export const DEFAULT_FONT_SIZE = 14;
+export const FONT_SIZE_MIN = 8;
+export const FONT_SIZE_MAX = 32;
+
 /** Max file-list rows rendered at once (larger directories are searchable). */
 export const MAX_FILE_ROWS = 2000;
 

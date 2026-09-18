@@ -2,6 +2,7 @@
   import { createEventDispatcher } from "svelte";
 
   import { changeAccessPassword } from "$lib/auth";
+  import { FONT_SIZE_MAX, FONT_SIZE_MIN } from "$lib/constants";
   import { lang, setLang, t, type Lang } from "$lib/i18n";
   import { settings, updateSettings } from "$lib/settings";
   import { makeToast, toastError } from "$lib/toast";
@@ -28,6 +29,7 @@
 
   let inputTheme = $state<ThemeName>($settings.theme);
   let inputScrollback = $state($settings.scrollback);
+  let inputFontSize = $state($settings.fontSize);
   let inputLang = $state<Lang>($lang);
 
   // Reset the draft inputs from the live settings each time the dialog opens
@@ -38,6 +40,7 @@
       initDone = true;
       inputTheme = $settings.theme;
       inputScrollback = $settings.scrollback;
+      inputFontSize = $settings.fontSize;
       inputLang = $lang;
       void loadKeys();
     } else if (!open) {
@@ -223,6 +226,33 @@
     </div>
     <div class="item">
       <div>
+        <p class="item-title">{t($lang, "settings.fontSize")}</p>
+        <p class="item-subtitle">{t($lang, "settings.fontSizeHint")}</p>
+      </div>
+      <div>
+        <!-- Only in-range values are written through: a half-typed number
+             ("2" on the way to "20") must not resize the terminal twice, and
+             `settings.ts` clamps whatever ends up stored anyway. -->
+        <input
+          type="number"
+          class="input-base w-52"
+          bind:value={inputFontSize}
+          oninput={() => {
+            if (
+              inputFontSize >= FONT_SIZE_MIN &&
+              inputFontSize <= FONT_SIZE_MAX
+            ) {
+              updateSettings({ fontSize: inputFontSize });
+            }
+          }}
+          min={FONT_SIZE_MIN}
+          max={FONT_SIZE_MAX}
+          step="1"
+        />
+      </div>
+    </div>
+    <div class="item">
+      <div>
         <p class="item-title">{t($lang, "settings.chgPwd")}</p>
         <p class="item-subtitle">{t($lang, "settings.chgPwdHint")}</p>
       </div>
@@ -379,8 +409,10 @@
   </div>
 
   <p class="mt-6 text-sm text-right text-zinc-400">
-    <a target="_blank" rel="noreferrer" href="https://github.com/fayfoxcat/sshweb"
-      >sshweb v{__APP_VERSION__}</a
+    <a
+      target="_blank"
+      rel="noreferrer"
+      href="https://github.com/fayfoxcat/sshweb">sshweb v{__APP_VERSION__}</a
     >
   </p>
 </OverlayMenu>

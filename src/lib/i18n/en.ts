@@ -48,6 +48,9 @@ const en = {
   "settings.scrollback": "Scrollback lines",
   "settings.scrollbackHint":
     "Lines of previous text shown in the terminal window.",
+  "settings.fontSize": "Font size",
+  "settings.fontSizeHint":
+    "Terminal text size in pixels (8–32). Applies immediately, re-computes the rows/columns and syncs them to the remote.",
   "settings.chgPwd": "Change password",
   "settings.chgPwdHint":
     "The server config is re-encrypted with the new password; this session stays signed in, other browser sessions are signed out.",

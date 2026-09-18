@@ -46,6 +46,9 @@ const zh = {
   "settings.themeHint": "终端中文本的颜色主题。",
   "settings.scrollback": "回滚行数",
   "settings.scrollbackHint": "终端窗口中显示的此前文本行数。",
+  "settings.fontSize": "字体大小",
+  "settings.fontSizeHint":
+    "终端文字大小（8–32 像素）。改动立即生效，并重新排算行列后同步给远端终端。",
   "settings.chgPwd": "修改访问密码",
   "settings.chgPwdHint":
     "修改后服务端配置将用新密码加密；当前会话保持登录，其他浏览器会话会退出登录。",

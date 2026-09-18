@@ -49,6 +49,51 @@
   let newSubmenuOpen = $state(false);
   let uploadSubmenuOpen = $state(false);
 
+  /** Width of the widest flyout (`w-48` = 192px + 2px border): what decides
+   *  whether a flyout still fits to the right of its row. */
+  const FLYOUT_WIDTH = 194;
+  /** Gap kept between the menu and the viewport edges (px). */
+  const EDGE_MARGIN = 4;
+
+  let el = $state<HTMLDivElement>();
+  /** Clamped position, or `null` until the menu has been measured: the menu's
+   *  real size only exists once it has been rendered, so until then it stays at
+   *  the pointer and is kept invisible — it must never paint a frame outside
+   *  the viewport, which is the bug this replaced (see the effect below). */
+  let placed = $state<{ left: number; top: number } | null>(null);
+  /** Whether the flyouts have to open to the left of their row. */
+  let flipFlyout = $state(false);
+
+  $effect(() => {
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    // Clamp against the **measured** box. This is why the size is not
+    // hardcoded: the menu's height depends on how many rows it has, and a
+    // right-click near the bottom edge used to cut the last rows off whenever
+    // the assumed height was too small.
+    const width = rect.width;
+    const height = rect.height;
+    const nextLeft = Math.max(
+      EDGE_MARGIN,
+      Math.min(x, window.innerWidth - width - EDGE_MARGIN),
+    );
+    const nextTop = Math.max(
+      EDGE_MARGIN,
+      Math.min(y, window.innerHeight - height - EDGE_MARGIN),
+    );
+    // A flyout opens to the right of its row (`left-full`). Flip it, but only
+    // when flipping is what actually keeps it on screen — otherwise a menu
+    // sitting in the middle of a narrow window would keep its flyouts on the
+    // left for no reason.
+    const roomRight = window.innerWidth - (nextLeft + width + EDGE_MARGIN);
+    const roomLeft = nextLeft - EDGE_MARGIN;
+    flipFlyout = roomRight < FLYOUT_WIDTH && roomLeft > roomRight;
+    // No vertical flip needs to exist: the clamped menu keeps every row inside
+    // the viewport, and the two flyout rows sit in its first ~125px, so a
+    // ~78px flyout cannot leave through the bottom.
+    placed = { left: nextLeft, top: nextTop };
+  });
+
   function fire(action: string) {
     onClose();
     onAction(action);
@@ -71,8 +116,10 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   class="fixed z-[90] w-52 rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-xl"
-  style:left={`${Math.min(x, window.innerWidth - 216)}px`}
-  style:top={`${Math.min(y, window.innerHeight - 330)}px`}
+  class:invisible={!placed}
+  bind:this={el}
+  style:left={`${placed?.left ?? x}px`}
+  style:top={`${placed?.top ?? y}px`}
   oncontextmenu={(event) => event.preventDefault()}
 >
   <!-- 新建 (flyout: 新建文件 / 新建文件夹) -->
@@ -96,7 +143,9 @@
     {#if newSubmenuOpen}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
-        class="absolute left-full top-0 z-[95] w-44 rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-xl"
+        class="absolute top-0 z-[95] w-44 rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-xl {flipFlyout
+          ? 'right-full'
+          : 'left-full'}"
         onmouseleave={() => (newSubmenuOpen = false)}
       >
         <button
@@ -140,7 +189,9 @@
     {#if uploadSubmenuOpen}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
-        class="absolute left-full top-0 z-[95] w-48 rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-xl"
+        class="absolute top-0 z-[95] w-48 rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-xl {flipFlyout
+          ? 'right-full'
+          : 'left-full'}"
         onmouseleave={() => (uploadSubmenuOpen = false)}
       >
         <button

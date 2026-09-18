@@ -8,13 +8,25 @@
     let state: "initial" | "loading" | "loaded" = "initial";
     const waitlist: (() => void)[] = [];
 
-    return async function waitForFonts() {
+    return async function waitForFonts(fontSize: number) {
       if (state === "loaded") return;
       else if (state === "initial") {
-        const FontFaceObserver = (await import("fontfaceobserver")).default;
         state = "loading";
         try {
-          await new FontFaceObserver("Fira Code VF").load();
+          // `document.fonts` is Baseline Widely available (Chrome 35+), and
+          // `app.css` declares the face itself, so the third-party observer is
+          // gone. One semantic difference: `load()` *resolves* with an empty
+          // list when the family isn't in the FontFaceSet (it only rejects on
+          // an actual fetch failure), so an empty result is what maps to
+          // fontfaceobserver's "font unavailable" and keeps the toast.
+          //
+          // The size is the configured one (only the family decides whether a
+          // face matches, but there is no reason to probe at a size the user
+          // does not use).
+          const loaded = await document.fonts.load(
+            `${fontSize}px "Fira Code VF"`,
+          );
+          if (loaded.length === 0) throw new Error("font unavailable");
         } catch (error) {
           makeToast({
             kind: "error",
@@ -38,7 +50,7 @@
 
   import { createEventDispatcher, onDestroy, onMount } from "svelte";
   import type { Terminal } from "sshx-xterm";
-  import type { FitAddon } from "xterm-addon-fit";
+  import type { FitAddon } from "@xterm/addon-fit";
   import { Buffer } from "buffer";
 
   import themes from "./themes";
@@ -101,12 +113,34 @@
   let theme = $derived(themes[$settings.theme]);
   let loaded = $state(false);
 
-  // When the theme / scrollback settings change, apply them to existing
-  // terminals' appearance.
+  // When the theme / scrollback / font-size settings change, apply them to
+  // existing terminals' appearance. The font size is tracked separately because
+  // it is the only one that changes the *geometry*: the character cell is
+  // re-measured (xterm measures on every `fontSize` write), so the row/column
+  // count no longer fills the pane and the server's PTY keeps the old winsize —
+  // which makes the remote wrap at the wrong column. Hence the re-`fit()`,
+  // which recomputes rows/cols and reports them.
+  //
+  // The settings are read *before* the `if`, and the guard is `ready` rather
+  // than `term`, for the same reason as the focus effect above: `term` is a
+  // plain `let`, and this effect's first run happens before the terminal
+  // exists (`onMount` awaits the xterm imports). Reading them inside the guard
+  // meant the first run touched no reactive value at all, so the effect
+  // subscribed to nothing and never ran again — the settings then only ever
+  // applied to terminals created *after* the change.
+  let appliedFontSize = $settings.fontSize;
   $effect(() => {
-    if (term) {
-      term.options.theme = theme;
-      term.options.scrollback = $settings.scrollback;
+    const nextTheme = theme;
+    const nextScrollback = $settings.scrollback;
+    const nextFontSize = $settings.fontSize;
+    if (ready && term) {
+      term.options.theme = nextTheme;
+      term.options.scrollback = nextScrollback;
+      if (nextFontSize !== appliedFontSize) {
+        appliedFontSize = nextFontSize;
+        term.options.fontSize = nextFontSize;
+        void fit();
+      }
     }
   });
 
@@ -205,15 +239,20 @@
   }
 
   onMount(async () => {
+    // The scoped `@xterm/addon-*` packages are pinned to their last build of
+    // the **5.x generation** (see package.json): the newest releases target
+    // `@xterm/xterm@6`, which dropped the canvas renderer this component
+    // depends on (see the `fontFamily` note below). The unscoped
+    // `xterm-addon-*` names these replace are npm-deprecated.
     const [{ Terminal }, { WebLinksAddon }, { ImageAddon }, { FitAddon }] =
       await Promise.all([
         import("sshx-xterm"),
-        import("xterm-addon-web-links"),
-        import("xterm-addon-image"),
-        import("xterm-addon-fit"),
+        import("@xterm/addon-web-links"),
+        import("@xterm/addon-image"),
+        import("@xterm/addon-fit"),
       ]);
 
-    await waitForFonts();
+    await waitForFonts($settings.fontSize);
 
     term = new Terminal({
       allowTransparency: false,
@@ -229,7 +268,7 @@
       // so cursor position never drifts.
       fontFamily:
         '"Fira Code VF", "Sarasa Mono SC", "Noto Sans Mono CJK SC", "WenQuanYi Zen Hei Mono", "Cascadia Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-      fontSize: 14,
+      fontSize: $settings.fontSize,
       fontWeight: 400,
       fontWeightBold: 500,
       lineHeight: 1.06,
