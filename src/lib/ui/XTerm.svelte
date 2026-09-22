@@ -278,6 +278,35 @@
 
     // Copy / paste + natural text-editing shortcuts.
     term.attachCustomKeyEventHandler((event) => {
+      // Shift/Ctrl+Enter = newline, not submit (已知坑 98). The fork encodes
+      // Enter, Shift+Enter and Ctrl+Enter as the *same* CR (see `case 13` in
+      // `node_modules/sshx-xterm/src/common/input/Keyboard.ts`, which only ever
+      // looks at `altKey`), and agent CLIs treat CR as "submit" — so without
+      // this branch Shift+Enter cannot produce a line break in claude/pi at
+      // all. Answer with LF (0x0A, the byte Ctrl+J sends) instead: it is
+      // `chat:newline` in Claude Code and one of `tui.input.newLine`'s defaults
+      // in pi, and in a plain shell readline binds LF and CR to the same
+      // `accept-line`, so nothing changes there (vim treats LF as a line break
+      // too).
+      //
+      // Three details are load-bearing: `keydown` (xterm consults this callback
+      // for keypress/keyup as well, and Enter fires all three), `preventDefault`
+      // (otherwise the browser still sends a keypress that xterm encodes into a
+      // second, submitting CR) and `!isComposing` (an IME commits a candidate
+      // with Enter; that keystroke must stay with the IME).
+      if (
+        event.type === "keydown" &&
+        event.key === "Enter" &&
+        (event.shiftKey || event.ctrlKey) &&
+        !event.altKey &&
+        !event.metaKey &&
+        !event.isComposing
+      ) {
+        event.preventDefault();
+        dispatch("data", new Uint8Array([0x0a]));
+        return false;
+      }
+
       const primary = isMac
         ? event.metaKey && !event.ctrlKey && !event.altKey
         : event.ctrlKey && !event.metaKey && !event.altKey;
