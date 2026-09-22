@@ -51,17 +51,34 @@ pub async fn shell_task(
     mut shell_rx: mpsc::Receiver<ShellData>,
     session: Arc<Session>,
 ) -> Result<()> {
-    let mut term = Terminal::new(&shell, cwd.as_deref()).await?;
+    // Terminal transcoding: only applies to the terminal (file browsing and
+    // downloads are raw byte streams; the editor picks the file's encoding).
+    let mut transcode = Transcode::new(&local.encoding);
+    tracing::debug!(%id, enc = %local.encoding, transcode = transcode.needed(), "local terminal encoding");
+
+    // 已知坑 97: a local shell is the only shell in this product that does not
+    // come from a login program, so it inherits *this* process's locale — often
+    // `C` — and coreutils then escapes every non-ASCII filename instead of
+    // printing it. Give it the locale a real login would get, but only for a
+    // UTF-8 terminal: with a non-UTF-8 编码 the shell is *supposed* to emit that
+    // codeset's bytes for `Transcode` to decode, and forcing UTF-8 would break
+    // exactly the setup the encoding setting asks for.
+    let locale = if transcode.needed() {
+        None
+    } else {
+        crate::utils::local_shell_locale_fix().await
+    };
+    let mut term = Terminal::new(
+        &shell,
+        cwd.as_deref(),
+        locale.as_ref().map(|(name, value)| (*name, value.as_str())),
+    )
+    .await?;
     term.set_winsize(24, 80)?;
     debug!(%id, "spawning new shell");
     // Record the shell's pid so the session can read its live cwd via
     // /proc/<pid>/cwd (no terminal echo, unlike injecting a `pwd` command).
     session.set_shell_pid(id, term.pid());
-
-    // Terminal transcoding: only applies to the terminal (file browsing and
-    // downloads are raw byte streams; the editor picks the file's encoding).
-    let mut transcode = Transcode::new(&local.encoding);
-    tracing::debug!(%id, enc = %local.encoding, transcode = transcode.needed(), "local terminal encoding");
 
     // Startup snippet: typed line by line with the same pacing as the remote
     // side (已知坑 45 — a whole-snippet write is eaten by readline, which would

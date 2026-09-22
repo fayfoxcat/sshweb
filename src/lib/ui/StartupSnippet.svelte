@@ -113,7 +113,7 @@
     <input
       class="input-base font-mono text-xs text-zinc-200 placeholder:text-zinc-600"
       bind:value
-      placeholder="export LANG=C; cd /data/app"
+      placeholder="export LANG=C.UTF-8; cd /data/app"
       title={t($lang, "startup.title")}
     />
   {/if}

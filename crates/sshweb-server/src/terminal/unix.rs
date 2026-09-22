@@ -30,12 +30,27 @@ pub struct Terminal {
 
 impl Terminal {
     /// Create a new terminal, with attached PTY.
+    ///
+    /// `locale` is the `(variable, value)` the shell should be started with so
+    /// that its environment selects a UTF-8 locale (已知坑 97), or `None` to
+    /// leave the inherited environment alone. It is resolved by the caller, in
+    /// the parent process — see `utils::local_shell_locale_fix`.
     #[instrument]
-    pub async fn new(shell: &str, cwd: Option<&str>) -> Result<Terminal> {
+    pub async fn new(
+        shell: &str,
+        cwd: Option<&str>,
+        locale: Option<(&'static str, &str)>,
+    ) -> Result<Terminal> {
         let result = pty::openpty(None, None)?;
 
+        // Logged in the parent: the child must not allocate or take the env lock
+        // beyond the `set_var` calls it has always made (已知坑 97).
+        if let Some((name, value)) = locale {
+            tracing::debug!(%name, %value, "forcing a UTF-8 locale for the local shell");
+        }
+
         // The slave file descriptor was created by openpty() and is forked here.
-        let child = Self::fork_child(shell, cwd, result.slave.as_raw_fd())?;
+        let child = Self::fork_child(shell, cwd, result.slave.as_raw_fd(), locale)?;
 
         // We need to clone the file object to prevent livelocks in Tokio, when multiple
         // reads and writes happen concurrently on the same file descriptor. This is a
@@ -61,14 +76,19 @@ impl Terminal {
     }
 
     /// Entry point for the child process, which spawns a shell.
-    fn fork_child(shell: &str, cwd: Option<&str>, slave_port: RawFd) -> Result<Pid> {
+    fn fork_child(
+        shell: &str,
+        cwd: Option<&str>,
+        slave_port: RawFd,
+        locale: Option<(&'static str, &str)>,
+    ) -> Result<Pid> {
         let shell = CString::new(shell.to_owned())?;
 
         // Safety: This does not use any async-signal-unsafe operations in the child
         // branch, such as memory allocation.
         match unsafe { fork() }? {
             ForkResult::Parent { child } => Ok(child),
-            ForkResult::Child => match Self::execv_child(&shell, cwd, slave_port) {
+            ForkResult::Child => match Self::execv_child(&shell, cwd, slave_port, locale) {
                 Ok(infallible) => match infallible {},
                 Err(_) => std::process::exit(1),
             },
@@ -79,6 +99,7 @@ impl Terminal {
         shell: &CStr,
         cwd: Option<&str>,
         slave_port: RawFd,
+        locale: Option<(&'static str, &str)>,
     ) -> Result<Infallible, Errno> {
         // Safety: The slave file descriptor was created by openpty().
         Errno::result(unsafe { login_tty(slave_port) })?;
@@ -94,11 +115,31 @@ impl Terminal {
             }
         }
 
-        // Set terminal environment variables appropriately.
+        // Set terminal environment variables appropriately. Note that these
+        // `set_var` calls allocate and take std's environment lock inside a
+        // forked child of a multi-threaded process; that is only tolerable
+        // because the child `execvp`s immediately and never touches the
+        // environment again. The textbook alternative (build the whole envp in
+        // the parent and call `execvpe`) is a separate change and is not needed
+        // for correctness here.
         env::set_var("TERM", "xterm-256color");
         env::set_var("COLORTERM", "truecolor");
         env::set_var("TERM_PROGRAM", "sshweb");
         env::remove_var("TERM_PROGRAM_VERSION");
+
+        // 已知坑 97: a local shell is the only shell in this product that does
+        // not come from a login program — `ssh`/`su`/a desktop session get
+        // their locale from PAM's `pam_env`, while this bare `execvp` inherits
+        // sshweb's own environment. On a server started from an init script
+        // that means `LANG=C` (or nothing at all = glibc's C locale), and
+        // coreutils then escapes every non-ASCII filename as
+        // `''$'\345\205\254\345\205\261'` instead of printing 中文. The value
+        // is resolved by the parent before the fork and names the variable it
+        // has to replace (`LC_ALL`/`LC_CTYPE`/`LANG`), because setting `LANG`
+        // alone does nothing when a higher-precedence variable is in effect.
+        if let Some((name, value)) = locale {
+            env::set_var(name, value);
+        }
 
         // Start the process as a *login* shell, so `/etc/profile` and
         // `/etc/profile.d/*.sh` are read exactly like `ssh host` does. Without
