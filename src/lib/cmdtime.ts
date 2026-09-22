@@ -33,7 +33,7 @@ const PROMPT_PREFIX = /[@:/~\]\\]/;
  *  (a `$ ` inside a shell script argument, say). */
 const PROMPT_SCAN = 64;
 
-/** Cells left blank between the end of the command and the stamp. */
+/** Cells of blank kept between the end of the command and the stamp. */
 export const COMMAND_TIME_GAP = 2;
 
 /** Column of the prompt's last character, or -1 when the line is not a prompt.
@@ -82,17 +82,18 @@ export function shortCommandTime(date: Date): string {
 /** The stamp text for a command ending at `endColumn` (in cells) on a terminal
  *  `cols` wide: the full date-time when it fits, the bare time when only that
  *  fits, and `null` when neither does — the stamp is never allowed to cover the
- *  user's own command or run off the right edge. */
+ *  user's own command.
+ *
+ *  The stamp sits right after the command, so it needs room for the gap, its
+ *  own text, and nothing else: it is the command that must not be covered. */
 export function commandTimeFor(
   date: Date,
   endColumn: number,
   cols: number,
 ): string | null {
-  const fits = (length: number) =>
-    endColumn + COMMAND_TIME_GAP + length <= cols;
   const full = formatCommandTime(date);
-  if (fits(full.length)) return full;
+  if (endColumn + COMMAND_TIME_GAP + full.length <= cols) return full;
   const short = shortCommandTime(date);
-  if (fits(short.length)) return short;
+  if (endColumn + COMMAND_TIME_GAP + short.length <= cols) return short;
   return null;
 }
