@@ -251,8 +251,9 @@
   }
 
   // ---- Command-submit timestamps (已知坑 99) ----
-  // A command the user submits gets a dim gray time stamp right after it. The
-  // stamp is an xterm **decoration** anchored to a marker on the command's row:
+  // A command the user submits gets a dim gray time stamp on its own row, right
+  // aligned against the terminal's right edge. The stamp is an xterm
+  // **decoration** anchored to a marker on the command's row:
   // its text lives in a DOM overlay (`.xterm-decoration`, a child of
   // `.xterm-screen` and hence *outside* the `aria-hidden` `.xterm-rows`), never
   // in the buffer. That is what makes "不会被复制选中" structural rather than
@@ -315,7 +316,16 @@
     if (!marker) return;
     const decoration = term.registerDecoration({
       marker,
-      x: buf.cursorX + COMMAND_TIME_GAP,
+      // Right-aligned against the terminal's own right edge rather than placed
+      // after the command: the stamp is a fixed gutter, so it lands in the same
+      // spot for every command. `x` is measured from that edge, and the
+      // renderer resolves it (`right: x * cellW`) on every dimensions change,
+      // so the stamp keeps its distance when the pane is resized. `cols` never
+      // changes under a live decoration's width — a later resize can still make
+      // a stamp overlap a very long command's tail, which is only cosmetic (the
+      // digits are an overlay; buffer and selection are untouched).
+      anchor: "right",
+      x: COMMAND_TIME_GAP,
       width: text.length,
       height: 1,
       // Above the selection highlight (z-index 7 vs 6): the stamp stays readable
@@ -543,16 +553,17 @@
      rendering, outside Svelte's own tree, so the rule has to be `:global`.
      No background: the stamp is plain dim text, so the command's own line looks
      untouched and the digits only read as an annotation. The gray is fixed
-     rather than theme-derived because every shipped theme is dark, and
-     `#a1a1aa` (the zinc-400 the rest of the UI uses for secondary text) stays
-     legible on all of them without competing with the terminal's own
-     `#d8d8d8`-ish foreground. `pointer-events: none` keeps the stamp out of the
-     mouse path (selecting text and scrolling stay with the terminal
-     underneath), and `user-select: none` means a native drag can never pick the
-     digits up — the copy path could not see them anyway, since it reads the
-     buffer model. */
+     rather than theme-derived because every shipped theme is dark.
+     `#bcbcc4` is a step lighter than zinc-400 (`#a1a1aa`, the first try — the
+     user asked for lighter) but deliberately short of zinc-300's `#d4d4d8`,
+     which would sit indistinguishable from the terminal's own `#d8d8d8`-ish
+     foreground and stop reading as an annotation.
+     `pointer-events: none` keeps the stamp out of the mouse path (selecting text
+     and scrolling stay with the terminal underneath), and `user-select: none`
+     means a native drag can never pick the digits up — the copy path could not
+     see them anyway, since it reads the buffer model. */
   :global(.xterm .xterm-decoration.cmd-time) {
-    color: #a1a1aa;
+    color: #bcbcc4;
     white-space: nowrap;
     pointer-events: none;
     user-select: none;
