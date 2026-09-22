@@ -62,7 +62,7 @@
     commandTimeFor,
     isCommandLine,
   } from "$lib/cmdtime";
-  import { DEFAULT_FONT_SIZE } from "$lib/constants";
+  import { DEFAULT_FONT_SIZE, FONT_SIZE_MIN } from "$lib/constants";
 
   const dispatch = createEventDispatcher<{
     data: Uint8Array;
@@ -251,9 +251,9 @@
   }
 
   // ---- Command-submit timestamps (已知坑 99) ----
-  // A command the user submits gets a dim gray time stamp on its own row, right
-  // aligned against the terminal's right edge. The stamp is an xterm
-  // **decoration** anchored to a marker on the command's row:
+  // A command the user submits gets a dim gray time stamp right after it, drawn
+  // a couple of points smaller than the terminal's own text. The stamp is an
+  // xterm **decoration** anchored to a marker on the command's row:
   // its text lives in a DOM overlay (`.xterm-decoration`, a child of
   // `.xterm-screen` and hence *outside* the `aria-hidden` `.xterm-rows`), never
   // in the buffer. That is what makes "不会被复制选中" structural rather than
@@ -266,12 +266,19 @@
    *  change can re-apply the font. Entries remove themselves on dispose. */
   const stamps: { marker: IMarker; decoration: IDecoration }[] = [];
 
+  /** How much smaller than the terminal's text the stamp is drawn. */
+  const STAMP_FONT_DELTA = 2;
+
   /** The stamp is positioned on the character grid, so it has to use the
-   *  terminal's font rather than whatever the overlay would inherit. */
+   *  terminal's font rather than whatever the overlay would inherit. It is
+   *  smaller than the terminal's own text by design (it is an annotation, and
+   *  the extra air keeps it from reading as terminal content), but never below
+   *  `FONT_SIZE_MIN` — the smallest size the settings allow. */
   function applyStampFont(el: HTMLElement) {
     if (!term) return;
+    const size = term.options.fontSize ?? DEFAULT_FONT_SIZE;
     el.style.fontFamily = term.options.fontFamily ?? "";
-    el.style.fontSize = `${term.options.fontSize ?? DEFAULT_FONT_SIZE}px`;
+    el.style.fontSize = `${Math.max(FONT_SIZE_MIN, size - STAMP_FONT_DELTA)}px`;
   }
 
   function clearStamps() {
@@ -316,16 +323,11 @@
     if (!marker) return;
     const decoration = term.registerDecoration({
       marker,
-      // Right-aligned against the terminal's own right edge rather than placed
-      // after the command: the stamp is a fixed gutter, so it lands in the same
-      // spot for every command. `x` is measured from that edge, and the
-      // renderer resolves it (`right: x * cellW`) on every dimensions change,
-      // so the stamp keeps its distance when the pane is resized. `cols` never
-      // changes under a live decoration's width — a later resize can still make
-      // a stamp overlap a very long command's tail, which is only cosmetic (the
-      // digits are an overlay; buffer and selection are untouched).
-      anchor: "right",
-      x: COMMAND_TIME_GAP,
+      // Right after the command, `COMMAND_TIME_GAP` cells of air away from it.
+      // The stamp is a fixed-width box (`text.length` cells) holding smaller
+      // text, so it reads as an annotation hanging off the end of the line
+      // rather than as more text in it.
+      x: buf.cursorX + COMMAND_TIME_GAP,
       width: text.length,
       height: 1,
       // Above the selection highlight (z-index 7 vs 6): the stamp stays readable
@@ -554,16 +556,18 @@
      No background: the stamp is plain dim text, so the command's own line looks
      untouched and the digits only read as an annotation. The gray is fixed
      rather than theme-derived because every shipped theme is dark.
-     `#bcbcc4` is a step lighter than zinc-400 (`#a1a1aa`, the first try — the
-     user asked for lighter) but deliberately short of zinc-300's `#d4d4d8`,
-     which would sit indistinguishable from the terminal's own `#d8d8d8`-ish
-     foreground and stop reading as an annotation.
+     `#d0d0d6` is three progressively lighter steps from the first try, each one
+     asked for by the user (`#c9c9c9`-backed chip → plain `#a1a1aa` → `#bcbcc4`
+     → this). It is deliberately close to zinc-300's `#d4d4d8` and hence to the
+     terminal's own `#d8d8d8`-ish foreground: at this point the stamp is meant
+     to be barely-there, and the smaller font size above is what keeps it
+     legible.
      `pointer-events: none` keeps the stamp out of the mouse path (selecting text
      and scrolling stay with the terminal underneath), and `user-select: none`
      means a native drag can never pick the digits up — the copy path could not
      see them anyway, since it reads the buffer model. */
   :global(.xterm .xterm-decoration.cmd-time) {
-    color: #bcbcc4;
+    color: #d0d0d6;
     white-space: nowrap;
     pointer-events: none;
     user-select: none;
