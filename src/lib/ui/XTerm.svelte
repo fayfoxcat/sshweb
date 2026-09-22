@@ -550,16 +550,16 @@
      rendering, outside Svelte's own tree, so the rule has to be `:global`.
      No background: the stamp is plain dim text, so the command's own line looks
      untouched and the digits only read as an annotation. The gray is fixed
-     rather than theme-derived because every shipped theme is dark, and the 70%
+     rather than theme-derived because every shipped theme is dark, and the
      alpha keeps it clearly behind the terminal's own `#d8d8d8`-ish foreground
      (`#bcbcc4` at full opacity was still a touch loud; the hue is the same one
-     the user settled on, only the alpha changed).
+     the user settled on, only the alpha changed — 70% first, then 30%).
      `pointer-events: none` keeps the stamp out of the mouse path (selecting text
      and scrolling stay with the terminal underneath), and `user-select: none`
      means a native drag can never pick the digits up — the copy path could not
      see them anyway, since it reads the buffer model. */
   :global(.xterm .xterm-decoration.cmd-time) {
-    color: rgba(188, 188, 196, 0.7);
+    color: rgba(188, 188, 196, 0.3);
     white-space: nowrap;
     pointer-events: none;
     user-select: none;
