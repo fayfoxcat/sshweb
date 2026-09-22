@@ -53,7 +53,7 @@ const en = {
     "Terminal text size in pixels (8–32). Applies immediately, re-computes the rows/columns and syncs them to the remote.",
   "settings.commandTime": "Command timestamps",
   "settings.commandTimeHint":
-    "Shows when each command was submitted, at the end of its line (a light-gray chip: not terminal content, so it cannot be copied). Long lines fall back to the time alone, then to nothing.",
+    "Shows when each command was submitted, at the end of its line (dim gray text, no background: not terminal content, so it cannot be copied). Long lines fall back to the time alone, then to nothing.",
   "settings.chgPwd": "Change password",
   "settings.chgPwdHint":
     "The server config is re-encrypted with the new password; this session stays signed in, other browser sessions are signed out.",

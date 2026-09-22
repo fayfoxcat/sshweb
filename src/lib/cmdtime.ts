@@ -1,6 +1,6 @@
 // Command-submit timestamps (已知坑 99) — the text side of the feature: decide
 // whether the line under the cursor is "shell prompt + command" and format the
-// time that goes into the chip after it.
+// time that goes into the stamp after it.
 //
 // Pure string functions with no xterm dependency, on purpose: the judgement
 // only needs the logical line's text, so the local and the remote terminal
@@ -10,7 +10,7 @@
 // been a second, divergent code path plus a protocol message.)
 //
 // The heuristic is deliberately conservative: a false negative just means a
-// command without a chip, while a false positive would stamp time inside a
+// command without a stamp, while a false positive would stamp time inside a
 // program's own prompt. See `开发记录文档.md` 坑 99 for the full case table.
 
 /** Characters that can end a shell prompt. `❯`/`➜` are the modern
@@ -33,7 +33,7 @@ const PROMPT_PREFIX = /[@:/~\]\\]/;
  *  (a `$ ` inside a shell script argument, say). */
 const PROMPT_SCAN = 64;
 
-/** Cells left blank between the end of the command and the chip. */
+/** Cells left blank between the end of the command and the stamp. */
 export const COMMAND_TIME_GAP = 2;
 
 /** Column of the prompt's last character, or -1 when the line is not a prompt.
@@ -55,7 +55,7 @@ export function promptEndColumn(line: string): number {
 }
 
 /** Is this a shell prompt with something typed after it? Pressing Enter on an
- *  empty prompt runs nothing, so it gets no chip. */
+ *  empty prompt runs nothing, so it gets no stamp. */
 export function isCommandLine(line: string): boolean {
   const end = promptEndColumn(line);
   return end >= 0 && line.slice(end + 1).trim() !== "";
@@ -79,9 +79,9 @@ export function shortCommandTime(date: Date): string {
   );
 }
 
-/** The chip text for a command ending at `endColumn` (in cells) on a terminal
+/** The stamp text for a command ending at `endColumn` (in cells) on a terminal
  *  `cols` wide: the full date-time when it fits, the bare time when only that
- *  fits, and `null` when neither does — the chip is never allowed to cover the
+ *  fits, and `null` when neither does — the stamp is never allowed to cover the
  *  user's own command. */
 export function commandTimeFor(
   date: Date,
