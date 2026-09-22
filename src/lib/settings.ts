@@ -13,6 +13,8 @@ export type Settings = {
   theme: ThemeName;
   scrollback: number;
   fontSize: number;
+  /** Stamp the submit time after each command run in the terminal (见坑 99). */
+  commandTime: boolean;
 };
 
 const storedSettings = persisted<Partial<Settings>>(STORAGE_KEY_SETTINGS, {});
@@ -43,10 +45,18 @@ export const settings: Readable<Settings> = derived(
       Math.max(FONT_SIZE_MIN, Math.round(fontSize)),
     );
 
+    // On by default, and only an explicit `false` turns it off: a stored value
+    // that is missing or hand-edited to junk must not silently disable it.
+    const commandTime =
+      typeof $storedSettings.commandTime === "boolean"
+        ? $storedSettings.commandTime
+        : true;
+
     return {
       theme,
       scrollback,
       fontSize,
+      commandTime,
     };
   },
 );

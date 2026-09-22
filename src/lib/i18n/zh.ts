@@ -49,6 +49,9 @@ const zh = {
   "settings.fontSize": "字体大小",
   "settings.fontSizeHint":
     "终端文字大小（8–32 像素）。改动立即生效，并重新排算行列后同步给远端终端。",
+  "settings.commandTime": "命令时间戳",
+  "settings.commandTimeHint":
+    "命令回车后在行尾显示执行时间（浅灰底,不属于终端内容,复制不到）。长命令放不下时只显示时分秒,再放不下就不显示。",
   "settings.chgPwd": "修改访问密码",
   "settings.chgPwdHint":
     "修改后服务端配置将用新密码加密；当前会话保持登录，其他浏览器会话会退出登录。",

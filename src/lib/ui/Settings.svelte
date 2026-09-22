@@ -30,6 +30,7 @@
   let inputTheme = $state<ThemeName>($settings.theme);
   let inputScrollback = $state($settings.scrollback);
   let inputFontSize = $state($settings.fontSize);
+  let inputCommandTime = $state($settings.commandTime);
   let inputLang = $state<Lang>($lang);
 
   // Reset the draft inputs from the live settings each time the dialog opens
@@ -41,6 +42,7 @@
       inputTheme = $settings.theme;
       inputScrollback = $settings.scrollback;
       inputFontSize = $settings.fontSize;
+      inputCommandTime = $settings.commandTime;
       inputLang = $lang;
       void loadKeys();
     } else if (!open) {
@@ -248,6 +250,20 @@
           min={FONT_SIZE_MIN}
           max={FONT_SIZE_MAX}
           step="1"
+        />
+      </div>
+    </div>
+    <div class="item">
+      <div>
+        <p class="item-title">{t($lang, "settings.commandTime")}</p>
+        <p class="item-subtitle">{t($lang, "settings.commandTimeHint")}</p>
+      </div>
+      <div>
+        <input
+          type="checkbox"
+          class="accent-indigo-500"
+          bind:checked={inputCommandTime}
+          onchange={() => updateSettings({ commandTime: inputCommandTime })}
         />
       </div>
     </div>

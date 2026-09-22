@@ -49,7 +49,7 @@
   import { browser } from "$app/environment";
 
   import { createEventDispatcher, onDestroy, onMount } from "svelte";
-  import type { Terminal } from "sshx-xterm";
+  import type { IDecoration, IMarker, Terminal } from "sshx-xterm";
   import type { FitAddon } from "@xterm/addon-fit";
   import { Buffer } from "buffer";
 
@@ -57,6 +57,12 @@
   import { settings } from "$lib/settings";
   import { copyText, readClipboard } from "$lib/clipboard";
   import { readDropPayload, type DropPayload } from "$lib/upload";
+  import {
+    COMMAND_TIME_GAP,
+    commandTimeFor,
+    isCommandLine,
+  } from "$lib/cmdtime";
+  import { DEFAULT_FONT_SIZE } from "$lib/constants";
 
   const dispatch = createEventDispatcher<{
     data: Uint8Array;
@@ -140,6 +146,12 @@
         appliedFontSize = nextFontSize;
         term.options.fontSize = nextFontSize;
         void fit();
+        // The chip is a DOM overlay with its own copy of the font, so it has to
+        // be re-applied by hand (its box is resized by the renderer, its text
+        // would otherwise stay at the old size).
+        for (const { decoration } of badges) {
+          if (decoration.element) applyBadgeFont(decoration.element);
+        }
       }
     }
   });
@@ -238,6 +250,107 @@
     });
   }
 
+  // ---- Command-submit timestamps (已知坑 99) ----
+  // A command the user submits gets a light-gray time chip right after it. The
+  // chip is an xterm **decoration** anchored to a marker on the command's row:
+  // its text lives in a DOM overlay (`.xterm-decoration`, a child of
+  // `.xterm-screen` and hence *outside* the `aria-hidden` `.xterm-rows`), never
+  // in the buffer. That is what makes "不会被复制选中" structural rather than
+  // cosmetic — `getSelection()` reads the buffer model, so the digits cannot be
+  // in a copy, and the command's own bytes are untouched. The marker is
+  // disposed once scrollback trims its line, and `DecorationService` disposes
+  // the decoration along with it, so nothing drifts or leaks.
+
+  /** Live chips, so the settings switch can remove them at once and a font-size
+   *  change can re-apply the font. Entries remove themselves on dispose. */
+  const badges: { marker: IMarker; decoration: IDecoration }[] = [];
+
+  /** The chip is positioned on the character grid, so it has to use the
+   *  terminal's font rather than whatever the overlay would inherit. */
+  function applyBadgeFont(el: HTMLElement) {
+    if (!term) return;
+    el.style.fontFamily = term.options.fontFamily ?? "";
+    el.style.fontSize = `${term.options.fontSize ?? DEFAULT_FONT_SIZE}px`;
+  }
+
+  function clearBadges() {
+    // `splice(0)` first: each `decoration.dispose()` fires the entry's own
+    // dispose handler, which would otherwise mutate the array being iterated.
+    for (const { marker, decoration } of badges.splice(0)) {
+      decoration.dispose();
+      marker.dispose();
+    }
+  }
+
+  /** Called from the key handler on a plain-Enter keydown, *before* xterm
+   *  encodes it. Nothing here may change what is sent to the shell: no
+   *  `preventDefault`, no `false` return, no write to the buffer. */
+  function noteSubmit() {
+    if (!term || !$settings.commandTime) return;
+    const buf = term.buffer.active;
+    // Full-screen programs draw on the alternate buffer (vim/less, and agent
+    // TUIs such as claude/pi while they hold the screen): their lines are not
+    // shell command lines and must never be stamped.
+    if (buf.type !== "normal") return;
+    // The logical line under the cursor: walk up past wrap continuations, then
+    // read to the right edge (`translateToString(true)` drops the blanks the
+    // shell left behind, which would otherwise hide the prompt's trailing
+    // space). A shell that prints a prompt without a preceding newline (after
+    // `printf 'x'`) leaves two candidate prompts on one line — the first is
+    // still a prompt, so the judgement holds and only the cursor matters for
+    // placement.
+    const row = buf.baseY + buf.cursorY;
+    let first = row;
+    while (first > 0 && buf.getLine(first)?.isWrapped) first--;
+    let line = "";
+    for (let r = first; r <= row; r++) {
+      line += buf.getLine(r)?.translateToString(true) ?? "";
+    }
+    if (!isCommandLine(line)) return;
+    // Everything below is in **cells**, never string indices: a command with
+    // CJK in it makes the two disagree (`cursorX` already counts 2 for one).
+    const text = commandTimeFor(new Date(), buf.cursorX, term.cols);
+    if (!text) return; // no room even for `HH:mm:ss` — a chip may not cover the command
+    const marker = term.registerMarker(0);
+    if (!marker) return;
+    const decoration = term.registerDecoration({
+      marker,
+      x: buf.cursorX + COMMAND_TIME_GAP,
+      width: text.length,
+      height: 1,
+      // Above the selection highlight (z-index 7 vs 6): the chip stays readable
+      // while text is being selected, which makes it obvious that it sits on
+      // top of the row rather than being part of it.
+      layer: "top",
+    });
+    if (!decoration) {
+      marker.dispose();
+      return;
+    }
+    const entry = { marker, decoration };
+    // The element only exists while its row is on screen, and it is re-created
+    // after a refresh, so the content and classes are set on every render.
+    decoration.onRender((el) => {
+      el.textContent = text;
+      el.classList.add("cmd-time");
+      el.setAttribute("aria-hidden", "true");
+      applyBadgeFont(el);
+    });
+    decoration.onDispose(() => {
+      const at = badges.indexOf(entry);
+      if (at >= 0) badges.splice(at, 1);
+      marker.dispose();
+    });
+    badges.push(entry);
+  }
+
+  // Turning the switch off also removes the chips already on screen, so the
+  // setting has a visible effect instead of only applying to new commands.
+  $effect(() => {
+    const enabled = $settings.commandTime;
+    if (ready && term && !enabled) clearBadges();
+  });
+
   onMount(async () => {
     // The scoped `@xterm/addon-*` packages are pinned to their last build of
     // the **5.x generation** (see package.json): the newest releases target
@@ -255,6 +368,10 @@
     await waitForFonts($settings.fontSize);
 
     term = new Terminal({
+      // `registerDecoration` (the command-time chip, 已知坑 99) is a proposed
+      // API: without this the call throws, and `registerMarker` — which is not
+      // gated — would leave a marker with no chip next to it.
+      allowProposedApi: true,
       allowTransparency: false,
       cursorBlink: false,
       cursorStyle: "block",
@@ -278,6 +395,22 @@
 
     // Copy / paste + natural text-editing shortcuts.
     term.attachCustomKeyEventHandler((event) => {
+      // Command-submit timestamps (已知坑 99). Only the keystroke that xterm
+      // encodes as CR counts as a submit: Shift/Ctrl+Enter (LF) and Alt+Enter
+      // (ESC+CR) are the newline escapes added for 已知坑 98, and stamping those
+      // would put a chip next to every line break inside a claude/pi prompt.
+      // Purely additive — the keystroke is still handled by xterm below.
+      if (
+        event.type === "keydown" &&
+        event.key === "Enter" &&
+        !event.shiftKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.isComposing
+      ) {
+        noteSubmit();
+      }
+
       // Shift/Ctrl+Enter = newline, not submit (已知坑 98). The fork encodes
       // Enter, Shift+Enter and Ctrl+Enter as the *same* CR (see `case 13` in
       // `node_modules/sshx-xterm/src/common/input/Keyboard.ts`, which only ever
@@ -404,3 +537,25 @@
     dispatch("dropfiles", { payload });
   }}
 ></div>
+
+<style>
+  /* Command-submit time chip (已知坑 99). xterm creates the element while
+     rendering, outside Svelte's own tree, so the rule has to be `:global`.
+     The colors are deliberately theme-independent: every shipped theme has a
+     dark background, so a light-gray chip with dark digits is legible on all
+     of them. `pointer-events: none` keeps the chip out of the mouse path
+     (selecting text and scrolling stay with the terminal underneath), and
+     `user-select: none` means a native drag can never pick the digits up — the
+     copy path could not see them anyway, since it reads the buffer model. */
+  :global(.xterm .xterm-decoration.cmd-time) {
+    background-color: #c9c9c9;
+    color: #1b1b1b;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+    border-radius: 2px;
+    pointer-events: none;
+    user-select: none;
+  }
+</style>
