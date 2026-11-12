@@ -44,6 +44,22 @@ impl Default for SftpPool {
 /// (`ssh::SSH_CONNECT_TIMEOUT`).
 const CONNECT_TIMEOUT: std::time::Duration = crate::ssh::SSH_CONNECT_TIMEOUT;
 
+/// How long the SFTP client may hold outgoing requests before flushing them
+/// into one SSH packet. **Not zero, and that is a throughput decision** (已知坑
+/// 104).
+///
+/// Every queued request costs ~0.6 ms of single-core CPU in the SSH transport
+/// here, and one request per packet is what that buys: measured on the 201 box
+/// over loopback (no network at all), a 64 MiB upload through this very code
+/// path ran at **28 MiB/s with `flush_interval(0)` and 42 MiB/s at 2 ms**
+/// (+47%), while OpenSSH's own `sftp put` on the same link did 197 MiB/s. The
+/// cost is up to 2 ms of extra latency per *round of requests*: a directory
+/// listing (open + readdir… + close) went from 3.2 ms to ~6 ms. That is
+/// invisible next to a real network round trip and far cheaper than losing half
+/// the upload throughput. 4 ms was slower (36 MiB/s): the queue then waits
+/// longer than it takes to drain.
+const SFTP_FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(2);
+
 /// Error of a combined SFTP connect + probe, so the caller can tell an SSH
 /// transport/authentication failure from an SFTP-permission failure.
 pub enum SftpConnectError {
@@ -157,9 +173,8 @@ pub async fn open_sftp_probe(
     // One connection, two channels: probe (`pwd; id -un`) and the SFTP
     // subsystem run **in parallel**, so the first file-manager open pays a
     // single round-trip for both instead of two serial ones (matters on
-    // high-latency remote hosts). `flush_interval(0)` makes every SFTP
-    // request leave immediately instead of batching for 0.5 ms, cutting the
-    // per-operation latency further.
+    // high-latency remote hosts). The flush interval is a throughput knob, not
+    // a latency one — see [`SFTP_FLUSH_INTERVAL`].
     let (probe_res, sftp_res) = tokio::join!(probe_dir_user(&handle), async {
         let channel = handle.channel_open_session().await.map_err(|e| {
             SftpConnectError::Connect(anyhow::anyhow!("open SFTP channel failed: {e}"))
@@ -176,7 +191,7 @@ pub async fn open_sftp_probe(
         Sftp::new(
             write_half,
             read_half,
-            SftpOptions::default().flush_interval(std::time::Duration::ZERO),
+            SftpOptions::default().flush_interval(SFTP_FLUSH_INTERVAL),
         )
         .await
         .map_err(|e| SftpConnectError::NoSftp {
