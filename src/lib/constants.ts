@@ -45,9 +45,9 @@ export const SROCKET_BUFFER_SIZE = 64;
 
 /** Chunk size for chunked SFTP uploads (bytes, see `sftpWriteAt`).
  *
- *  The server waits for a chunk's write to land on the target before it acks
- *  it, and the browser keeps one chunk in flight, so the upload's throughput
- *  is `chunk / round trip` — a small chunk makes it latency-bound. Over a jump
+ *  A chunk has to travel browser → server and be written before its ack comes
+ *  back, so the old one-chunk-at-a-time pacing made throughput
+ *  `chunk / round trip` — a small chunk makes it latency-bound. Over a jump
  *  host (~20 ms RTT) 240 KiB measured 2.9 MiB/s and 4 MiB measured 7.0 MiB/s
  *  (with the server pipelining the pieces internally, more). The SFTP request
  *  size is unaffected: the server still splits a chunk into the server's
@@ -56,6 +56,20 @@ export const SROCKET_BUFFER_SIZE = 64;
  *  Kept well under the server's 16 MiB WebSocket message cap, and small enough
  *  that a retry after a watchdog timeout does not re-send much. */
 export const UPLOAD_CHUNK = 4 * 1024 * 1024;
+
+/** How many chunks may be in flight at once.
+ *
+ *  Latency is the reason this is not 1: an ack-gated upload moves
+ *  `chunk / RTT` bytes per second, so on a 20 ms link 4 MiB chunks cap out
+ *  around 190 MiB/s *only* if the round trip is the only cost — in practice
+ *  the server's disk write and the browser's `FileReader` sit inside that
+ *  window too, and the measured result was about half of plain `scp`.
+ *  Three chunks keep the pipe busy across one round trip (~12 MiB of
+ *  in-browser memory) without flooding the server's bounded write queue
+ *  (`WRITE_QUEUE_CAP`). Reordering is not a concern: the server applies the
+ *  chunks through one FIFO worker, so arrival order — which is send order —
+ *  is preserved, and the offset-0 truncate still runs first. */
+export const UPLOAD_MAX_INFLIGHT = 3;
 
 /** Upload chunk-ack watchdog: if a chunk isn't acknowledged within this long
  *  (ms), it is retried — a dropped `sftpWriteOk` (the server's 512-bounded

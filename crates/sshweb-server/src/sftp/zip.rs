@@ -37,10 +37,15 @@ mod tests {
 
     /// Produce a ZIP archive for a single path and collect its bytes.
     fn collect_archive(path: &str) -> Vec<u8> {
+        collect_archive_with(path, false)
+    }
+
+    /// Same, with an explicit `flat` flag.
+    fn collect_archive_with(path: &str, flat: bool) -> Vec<u8> {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-            archive_local_stream(&[path.to_string()], false, tx).unwrap();
+            archive_local_stream(&[path.to_string()], flat, tx).unwrap();
             let mut out = Vec::new();
             while let Some(chunk) = rx.recv().await {
                 out.extend_from_slice(&chunk.unwrap());
@@ -49,13 +54,8 @@ mod tests {
         })
     }
 
-    #[test]
-    fn archive_skips_symlinks_and_names_children() {
-        let dir = make_fixture();
-        let root = dir.join("root");
-        let out = collect_archive(root.to_str().unwrap());
-        // List member names from the central directory (the entry names live
-        // at a fixed 46-byte offset inside each central-directory record).
+    /// Entry names from the central directory.
+    fn archive_names(out: &[u8]) -> Vec<String> {
         let eocd = &out[out.len() - 22..];
         assert_eq!(&eocd[0..4], [0x50, 0x4b, 0x05, 0x06]);
         let cd_size = u32::from_le_bytes([eocd[12], eocd[13], eocd[14], eocd[15]]) as usize;
@@ -70,14 +70,64 @@ mod tests {
             let comment = u16::from_le_bytes([out[i + 32], out[i + 33]]) as usize;
             i += 46 + name_len + extra + comment;
         }
-        let mut names = names;
         names.sort();
+        names
+    }
+
+    /// The central directory must claim a **Unix** host: with the old
+    /// MS-DOS value Info-ZIP's `unzip` converts every entry name from CP437 to
+    /// the local charset even though the UTF-8 flag is set, which turned
+    /// Chinese names into invalid, undeletable mojibake on the target box
+    /// (已知坑 101). This pins the byte so it cannot silently regress.
+    #[test]
+    fn central_directory_claims_a_unix_host() {
+        let dir = make_fixture();
+        let root = dir.join("root");
+        let out = collect_archive(root.to_str().unwrap());
+        let cd = out
+            .windows(4)
+            .position(|w| w == [0x50, 0x4b, 0x01, 0x02])
+            .expect("central directory record");
+        let made_by = u16::from_le_bytes([out[cd + 4], out[cd + 5]]);
+        assert_eq!(made_by & 0xff00, 3 << 8, "host byte must be Unix (3)");
+        // Unix host → external attributes are a real st_mode.
+        let attr = u32::from_le_bytes([out[cd + 38], out[cd + 39], out[cd + 40], out[cd + 41]]);
+        let mode = attr >> 16;
+        assert!(
+            mode & 0o170000 == 0o040000 || mode & 0o170000 == 0o100000,
+            "external attributes must be a Unix mode, got {mode:o}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn archive_skips_symlinks_and_names_children() {
+        let dir = make_fixture();
+        let root = dir.join("root");
+        let out = collect_archive(root.to_str().unwrap());
         // The symlink `link.txt` is skipped; files are nested under the root
         // directory name. Directory entries end with `/` (ZIP spec; some
         // extractors refuse to treat bare names as directories).
         assert_eq!(
-            names,
+            archive_names(&out),
             vec!["root/", "root/a.txt", "root/sub/", "root/sub/b.txt"]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `flat` drops the root folder itself: its contents become the top-level
+    /// entries. Deliberately **not** what the UI does any more — a single
+    /// folder download keeps its own name so extraction creates the directory
+    /// (已知坑 102); the flag stays for API compatibility.
+    #[test]
+    fn flat_archive_drops_the_root_folder() {
+        let dir = make_fixture();
+        let root = dir.join("root");
+        let out = collect_archive_with(root.to_str().unwrap(), true);
+        assert_eq!(
+            archive_names(&out),
+            vec!["a.txt", "sub/", "sub/b.txt"],
+            "flat mode must not create a root/ wrapper"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -119,6 +169,24 @@ const ZIP_FLAG_UTF8: u16 = 0x0800;
 /// on a streaming (non-rewindable) output, so we write the descriptor form
 /// ourselves.
 const ZIP_FLAG_DESCRIPTOR: u16 = 0x0008;
+
+/// "Version made by" for the central directory: version 2.0, host **Unix**
+/// (`0x03` in the high byte).
+///
+/// The host byte is load-bearing, not decoration. While writing `0x0014`
+/// (host 0 = MS-DOS) Info-ZIP's `unzip` treats every entry name as an OEM
+/// (CP437) string and converts it to the local charset *despite* the UTF-8
+/// flag — Chinese names came out as mojibake on the 201 box, and the resulting
+/// names were not valid UTF-8, so the file manager could not even delete them
+/// (已知坑 101). Claiming Unix also makes the external attributes below a real
+/// `st_mode` instead of DOS attribute bits.
+const ZIP_VERSION_MADE_BY: u16 = 20 | (3 << 8);
+
+/// External attributes for a regular file (Unix mode in the high 16 bits).
+const ZIP_ATTR_FILE: u32 = 0o100_644 << 16;
+/// External attributes for a directory: Unix mode plus the DOS directory bit
+/// (`0x10` in the low byte) that MS-DOS/Windows extractors look at.
+const ZIP_ATTR_DIR: u32 = (0o40_755 << 16) | 0x10;
 
 /// Central-directory record for one archived entry.
 struct ZipCentralEntry {
@@ -265,7 +333,7 @@ impl StreamZip {
         for entry in &self.entries {
             let mut c = Vec::with_capacity(46 + entry.name.len());
             c.extend_from_slice(&[0x50, 0x4B, 0x01, 0x02]);
-            c.extend_from_slice(&20u16.to_le_bytes()); // version made by
+            c.extend_from_slice(&ZIP_VERSION_MADE_BY.to_le_bytes()); // version made by (Unix host)
             c.extend_from_slice(&20u16.to_le_bytes()); // version needed
             c.extend_from_slice(&entry.flags.to_le_bytes());
             c.extend_from_slice(&entry.method.to_le_bytes());
@@ -279,7 +347,14 @@ impl StreamZip {
             c.extend_from_slice(&0u16.to_le_bytes()); // comment length
             c.extend_from_slice(&0u16.to_le_bytes()); // disk number
             c.extend_from_slice(&0u16.to_le_bytes()); // internal attrs
-            c.extend_from_slice(&(if entry.is_dir { 0x10u32 << 16 } else { 0 }).to_le_bytes());
+            c.extend_from_slice(
+                &(if entry.is_dir {
+                    ZIP_ATTR_DIR
+                } else {
+                    ZIP_ATTR_FILE
+                })
+                .to_le_bytes(),
+            );
             c.extend_from_slice(&entry.offset.to_le_bytes());
             c.extend_from_slice(entry.name.as_bytes());
             central.push(c);

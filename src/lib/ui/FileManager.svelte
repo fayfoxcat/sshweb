@@ -745,14 +745,14 @@
     }
     const name = archiveNameFor(selectedEntries);
     const paths = selectedEntries.map((e) => join(path, e.name));
-    const flat =
-      selectedEntries.length === 1 && selectedEntries[0].isDir
-        ? "flat=1"
-        : null;
+    // Always keep each selected item's own name as the archive's top-level
+    // entry — including a single folder, so extracting `web-ui` produces a
+    // `web-ui/` directory instead of scattering its contents into wherever the
+    // archive happened to be unpacked (the old `flat=1` behaviour; users read
+    // that as "the folder was not created", 已知坑 102).
     const url = `${sftpHttpPath(sessionName, viewShellId)}/archive?${[
       ...paths.map((p) => `path=${encodeURIComponent(p)}`),
       `filename=${encodeURIComponent(name)}`,
-      ...(flat ? [flat] : []),
     ].join("&")}`;
     triggerBrowserDownload(url, name);
   }

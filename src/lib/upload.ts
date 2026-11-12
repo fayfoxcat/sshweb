@@ -3,6 +3,7 @@ import { get, writable } from "svelte/store";
 import {
   UPLOAD_ACK_TIMEOUT_MS,
   UPLOAD_CHUNK,
+  UPLOAD_MAX_INFLIGHT,
   UPLOAD_MAX_RETRIES,
   UPLOAD_TASKS_KEY,
 } from "./constants";
@@ -23,13 +24,36 @@ type UploadTask = {
   error?: string;
 };
 
+/** One chunk handed to the socket and not yet acknowledged. */
+type InflightChunk = {
+  /** Byte offset of the chunk's first byte (also its ack identity). */
+  offset: number;
+  /** Bytes actually read from the File for this chunk (0 until the read ends). */
+  length: number;
+  /** True once the chunk's bytes have been handed to the socket. Distinguishes
+   *  "still being read" from "sent, but zero bytes long" — an *empty* file's
+   *  single chunk is legitimately 0 bytes, and it still has to be resent when
+   *  its ack is lost (otherwise the upload would sit there forever). */
+  sent: boolean;
+  /** When the chunk was (last) sent, for the watchdog. */
+  sentAt: number;
+  /** How many times this chunk's watchdog fired (resends). */
+  attempts: number;
+};
+
 /** In-flight upload keyed by `<shell>:<path>` — the same destination path on
  *  two different shells (servers) is two distinct uploads, so switching the
  *  file manager from server A to server B must never orphan A's upload (see
  *  已知坑: a Map keyed by path alone made the second upload overwrite the
- *  first, silently stopping it). Only one chunk per file is sent at a time;
- *  the next chunk is released by the previous ack, so a permission error on
- *  the first chunk never floods the server with the rest. */
+ *  first, silently stopping it).
+ *
+ *  Up to `UPLOAD_MAX_INFLIGHT` chunks are in flight at once. This is safe
+ *  *because* the server applies the chunks through one FIFO write worker:
+ *  arrival order is send order, so `offset 0`'s truncate always runs before
+ *  any later chunk of the same file — the ordering guarantee the old
+ *  one-chunk-at-a-time pacing was silently providing (已知坑 19/77). The ack
+ *  offset is still the only thing that advances progress, so a lost ack is
+ *  retried (idempotent write) rather than double-counted. */
 type Upload = {
   taskId: number;
   file: File;
@@ -42,34 +66,35 @@ type Upload = {
   targetDir: string;
   /** Total bytes to upload (the File's size at start). */
   total: number;
-  /** Number of distinct offsets acknowledged by the server. */
-  done: number;
-  /** Offset of the NEXT chunk to send. Advances only on ack, so a retry
-   *  re-reads exactly the unacknowledged bytes. */
-  nextOffset: number;
-  /** Offset of the chunk currently in flight, or null when none. */
-  inFlightOffset: number | null;
-  /** Byte length of the in-flight chunk. */
-  inFlightLength: number;
+  /** Bytes acknowledged so far (sum of acked chunk lengths). */
+  ackedBytes: number;
+  /** Index of the next chunk to start reading. */
+  nextChunk: number;
+  /** True while a `FileReader` is filling the next chunk. Only one read runs
+   *  at a time so chunks leave strictly in ascending offset order (see
+   *  `pump`). */
+  reading: boolean;
+  /** Sent, unacknowledged chunks, in send order. */
+  inflight: InflightChunk[];
+  /** Chunk indexes already acknowledged (acks are deduplicated by chunk, so a
+   *  retried chunk whose original ack surfaces later is not counted twice). */
+  acked: Set<number>;
   /** True once a chunk has been handed to the socket. Every chunk may have
-   *  been written even if its ack never arrived, so this — not `done` — is
-   *  what decides whether the server could be holding a partial file that a
+   *  been written even if its ack never arrived, so this — not `ackedBytes` —
+   *  is what decides whether the server could be holding a partial file that a
    *  failure must clean up. */
   wroteAny: boolean;
   /** True while the final `sftpUploadDone` awaits the server's size check
    *  (`sftpUploadOk`). No chunk is in flight then, so the watchdog has to
    *  retry the completion message instead of a chunk. */
   verifying: boolean;
-  /** Offsets already acknowledged by the server. A retried chunk can be
-   *  written twice (the original write happened but its ack was dropped, or a
-   *  delayed ack surfaces after the retry), so acks are deduplicated by
-   *  offset rather than counted blindly. */
-  ackedOffsets: Set<number>;
+  /** When the completion message was (last) sent, for the watchdog. */
+  verifyingSince: number;
+  /** Consecutive watchdog timeouts of the completion message. */
+  verifyAttempts: number;
   started: boolean;
-  /** Watchdog timer for the in-flight chunk (cleared on ack). */
+  /** Watchdog timer, armed for the oldest outstanding deadline. */
   watchdog: ReturnType<typeof setTimeout> | null;
-  /** Consecutive watchdog timeouts for the current chunk. */
-  retries: number;
   onDone: () => void;
 };
 
@@ -255,11 +280,25 @@ export function clearUploadTasks() {
   persistTasks();
 }
 
+/** Re-arm the upload's watchdog for the **oldest** outstanding deadline.
+ *
+ *  One timer per upload (not per chunk): with several chunks in flight the
+ *  earliest deadline is the only one that matters, and re-arming after every
+ *  event keeps a single code path for both "waiting for a chunk ack" and
+ *  "waiting for the completion check". */
 function armWatchdog(upload: Upload) {
   clearWatchdog(upload);
+  const now = Date.now();
+  const deadline = upload.verifying
+    ? upload.verifyingSince + UPLOAD_ACK_TIMEOUT_MS
+    : upload.inflight.length > 0
+      ? Math.min(...upload.inflight.map((c) => c.sentAt)) +
+        UPLOAD_ACK_TIMEOUT_MS
+      : null;
+  if (deadline === null) return;
   upload.watchdog = setTimeout(
-    () => onChunkTimeout(upload),
-    UPLOAD_ACK_TIMEOUT_MS,
+    () => onTimeout(upload),
+    Math.max(deadline - now, 0),
   );
 }
 
@@ -270,59 +309,186 @@ function clearWatchdog(upload: Upload) {
   }
 }
 
-/** A chunk was sent but no ack arrived within the watchdog window. A dropped
- *  `sftpWriteOk` (the server's 512-bounded output queue is best-effort) would
- *  otherwise stall the upload forever. Retry the SAME offset: the write is
- *  idempotent, and the offset-echo ack deduplicates any duplicate acks that
- *  surface later (the original ack may have merely been delayed). */
-function onChunkTimeout(upload: Upload) {
-  if (uploads.get(uploadKey(upload.targetShell, upload.targetPath)) !== upload)
-    return;
-  if (upload.verifying) {
-    // The completion message (or its size-check reply) was lost — resend it.
-    // Re-verifying an already-verified upload is harmless: the size still
-    // matches, so the server answers `sftpUploadOk` again.
-    upload.retries += 1;
-    if (upload.retries > UPLOAD_MAX_RETRIES) {
-      failTask(upload, tr("file.taskTimeout"));
-      return;
-    }
-    sendUploadDone(upload);
-    return;
-  }
-  if (upload.inFlightOffset === null) return;
-  upload.retries += 1;
-  if (upload.retries > UPLOAD_MAX_RETRIES) {
-    failTask(upload, tr("file.taskTimeout"));
-    return;
-  }
-  const chunkOffset = upload.inFlightOffset;
-  const end = Math.min(chunkOffset + UPLOAD_CHUNK, upload.total);
+/** Hand one already-read chunk to the socket and start its watchdog window. */
+function transmitChunk(
+  upload: Upload,
+  chunk: InflightChunk,
+  data: Uint8Array,
+): void {
+  chunk.length = data.length;
+  chunk.sent = true;
+  chunk.sentAt = Date.now();
+  // From here on the server may hold part of this file, so a later failure
+  // must clean it up (see `failTask`).
+  upload.wroteAny = true;
+  upload.targetSocket.send({
+    sftpWriteAt: [upload.targetShell, upload.targetPath, chunk.offset, data],
+  });
+  armWatchdog(upload);
+}
+
+/** Read one chunk of the file and send it. `chunk` is already registered in
+ *  `upload.inflight`, so a watchdog firing while the read is running resends
+ *  through the same entry instead of sending a second copy. */
+function readAndSend(upload: Upload, chunk: InflightChunk) {
+  const end = Math.min(chunk.offset + UPLOAD_CHUNK, upload.total);
   const reader = new FileReader();
   reader.onload = () => {
+    // The read finished: the read slot is free whatever happens next (the
+    // upload may even have been superseded meanwhile).
+    upload.reading = false;
     if (
       uploads.get(uploadKey(upload.targetShell, upload.targetPath)) !== upload
     )
       return;
     const data = new Uint8Array(reader.result as ArrayBuffer);
-    if (data.length === 0 && chunkOffset < upload.total) {
+    if (data.length === 0 && chunk.offset < upload.total) {
       failTask(upload, tr("file.readFail"));
       return;
     }
-    upload.inFlightLength = data.length;
-    upload.targetSocket.send({
-      sftpWriteAt: [upload.targetShell, upload.targetPath, chunkOffset, data],
-    });
-    armWatchdog(upload);
+    transmitChunk(upload, chunk, data);
+    pump(upload);
   };
   reader.onerror = () => {
+    upload.reading = false;
     if (
       uploads.get(uploadKey(upload.targetShell, upload.targetPath)) !== upload
     )
       return;
     failTask(upload, tr("file.readFail"));
   };
-  reader.readAsArrayBuffer(upload.file.slice(chunkOffset, end));
+  reader.readAsArrayBuffer(upload.file.slice(chunk.offset, end));
+}
+
+/** Number of chunks making up the file (at least one: an empty file still
+ *  needs its offset-0 write so the server creates it). */
+function chunkCount(upload: Upload): number {
+  return Math.max(1, Math.ceil(upload.total / UPLOAD_CHUNK));
+}
+
+/** Keep the pipeline full, and finish the upload once every byte is acked.
+ *
+ *  **Chunks are read in strictly ascending offset order** — only one
+ *  `FileReader` runs at a time — even though up to `UPLOAD_MAX_INFLIGHT`
+ *  chunks may be outstanding on the wire. That ordering is load-bearing, not
+ *  tidiness: the server's `write_at_remote` truncates the file when it sees
+ *  `offset == 0`, and the pieces of every *other* chunk open without
+ *  `truncate`, so a 0-offset chunk that arrives late would wipe whatever was
+ *  already written (已知坑 77, exactly the failure a first cut of this change
+ *  produced: `FileReader` callbacks may finish out of order, so pipelining the
+ *  *reads* silently reordered the sends and the uploaded file was corrupt with
+ *  the right length). Reads are local disk I/O — serializing them costs
+ *  nothing measurable, while the network keeps three chunks in flight.
+ */
+function pump(upload: Upload) {
+  if (uploads.get(uploadKey(upload.targetShell, upload.targetPath)) !== upload)
+    return;
+  if (upload.verifying) return; // awaiting the completion check
+
+  const total = chunkCount(upload);
+  if (
+    !upload.reading &&
+    upload.nextChunk < total &&
+    upload.inflight.length < UPLOAD_MAX_INFLIGHT
+  ) {
+    const offset = upload.nextChunk * UPLOAD_CHUNK;
+    upload.nextChunk += 1;
+    upload.reading = true;
+    upload.started = true;
+    const chunk: InflightChunk = {
+      offset,
+      length: 0,
+      sent: false,
+      sentAt: Date.now(),
+      attempts: 0,
+    };
+    upload.inflight.push(chunk);
+    readAndSend(upload, chunk);
+  }
+
+  // Completion is decided by BYTES, never by the number of acks: a chunk that
+  // came back shorter than `UPLOAD_CHUNK` would otherwise let the ack count
+  // reach the expected number while the file is still short.
+  if (
+    upload.ackedBytes >= upload.total &&
+    upload.inflight.length === 0 &&
+    !upload.reading
+  ) {
+    sendUploadDone(upload);
+    return;
+  }
+  armWatchdog(upload);
+}
+
+/** A chunk (or the completion check) outlived the watchdog window. A dropped
+ *  `sftpWriteOk` (the server's 512-bounded output queue is best-effort) would
+ *  otherwise stall the upload forever. Retry the SAME offsets: the writes are
+ *  idempotent, and the offset-echo ack deduplicates acks that surface late. */
+function onTimeout(upload: Upload) {
+  if (uploads.get(uploadKey(upload.targetShell, upload.targetPath)) !== upload)
+    return;
+  if (upload.verifying) {
+    // The completion message (or its size-check reply) was lost — resend it.
+    // Re-verifying an already-verified upload is harmless: the size still
+    // matches, so the server answers `sftpUploadOk` again.
+    upload.verifyAttempts += 1;
+    if (upload.verifyAttempts > UPLOAD_MAX_RETRIES) {
+      failTask(upload, tr("file.taskTimeout"));
+      return;
+    }
+    sendUploadDone(upload);
+    return;
+  }
+
+  const now = Date.now();
+  const stale = upload.inflight.filter(
+    (chunk) => now - chunk.sentAt >= UPLOAD_ACK_TIMEOUT_MS,
+  );
+  for (const chunk of stale) {
+    chunk.attempts += 1;
+    if (chunk.attempts > UPLOAD_MAX_RETRIES) {
+      failTask(upload, tr("file.taskTimeout"));
+      return;
+    }
+    // A chunk still being read (its `FileReader` has not fired yet) is just
+    // re-stamped: the read in progress will send it once. `sent` — not
+    // `length > 0` — is the test, because an empty file's only chunk is a
+    // legitimately 0-byte write that must still be retried.
+    chunk.sentAt = now;
+    if (chunk.sent) {
+      // Already sent once: re-read and re-send the same range. This is a
+      // *resend of an existing chunk*, so it must not take the read slot
+      // (`upload.reading`) — `pump` only ever reads the next, not-yet-sent
+      // offset, and taking the slot would stall that pipeline for a whole
+      // round trip.
+      const resend = chunk;
+      const end = Math.min(resend.offset + UPLOAD_CHUNK, upload.total);
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (
+          uploads.get(uploadKey(upload.targetShell, upload.targetPath)) !==
+          upload
+        )
+          return;
+        const data = new Uint8Array(reader.result as ArrayBuffer);
+        if (data.length === 0 && resend.offset < upload.total) {
+          failTask(upload, tr("file.readFail"));
+          return;
+        }
+        transmitChunk(upload, resend, data);
+      };
+      reader.onerror = () => {
+        if (
+          uploads.get(uploadKey(upload.targetShell, upload.targetPath)) !==
+          upload
+        )
+          return;
+        failTask(upload, tr("file.readFail"));
+      };
+      reader.readAsArrayBuffer(upload.file.slice(resend.offset, end));
+    }
+  }
+  armWatchdog(upload);
 }
 
 /** Send the completion message for an upload whose last byte was acked and
@@ -332,57 +498,11 @@ function onChunkTimeout(upload: Upload) {
  *  count. */
 function sendUploadDone(upload: Upload) {
   upload.verifying = true;
-  upload.inFlightOffset = null;
-  upload.inFlightLength = 0;
+  upload.verifyingSince = Date.now();
   upload.targetSocket.send({
     sftpUploadDone: [upload.targetShell, upload.targetPath, upload.total],
   });
   armWatchdog(upload);
-}
-
-/** Send exactly one chunk. The next chunk is sent only after the server
- *  acknowledges this one, so progress reflects bytes actually written. */
-function sendNextChunk(upload: Upload) {
-  if (uploads.get(uploadKey(upload.targetShell, upload.targetPath)) !== upload)
-    return;
-  if (upload.inFlightOffset !== null) return; // a chunk is in flight
-  if (upload.verifying) return; // awaiting the completion check
-  // Empty files still need one offset-0 write so the server creates them.
-  if (upload.started && upload.nextOffset >= upload.total) return;
-
-  const chunkOffset = upload.nextOffset;
-  const end = Math.min(chunkOffset + UPLOAD_CHUNK, upload.total);
-  const reader = new FileReader();
-  upload.started = true;
-  reader.onload = () => {
-    if (
-      uploads.get(uploadKey(upload.targetShell, upload.targetPath)) !== upload
-    )
-      return;
-    const data = new Uint8Array(reader.result as ArrayBuffer);
-    if (data.length === 0 && chunkOffset < upload.total) {
-      failTask(upload, tr("file.readFail"));
-      return;
-    }
-    upload.inFlightOffset = chunkOffset;
-    upload.inFlightLength = data.length;
-    upload.retries = 0;
-    // From here on the server may hold part of this file, so a later failure
-    // must clean it up (see `failTask`).
-    upload.wroteAny = true;
-    upload.targetSocket.send({
-      sftpWriteAt: [upload.targetShell, upload.targetPath, chunkOffset, data],
-    });
-    armWatchdog(upload);
-  };
-  reader.onerror = () => {
-    if (
-      uploads.get(uploadKey(upload.targetShell, upload.targetPath)) !== upload
-    )
-      return;
-    failTask(upload, tr("file.readFail"));
-  };
-  reader.readAsArrayBuffer(upload.file.slice(chunkOffset, end));
 }
 
 /** Upload a file in acknowledged chunks. `destPath` overrides the default
@@ -431,26 +551,27 @@ export function startUpload(opts: {
     targetPath: destPath,
     targetDir: parentOf(destPath),
     total: file.size,
-    done: 0,
-    nextOffset: 0,
-    inFlightOffset: null,
-    inFlightLength: 0,
+    ackedBytes: 0,
+    nextChunk: 0,
+    reading: false,
+    inflight: [],
+    acked: new Set(),
     wroteAny: false,
     verifying: false,
-    ackedOffsets: new Set(),
+    verifyingSince: 0,
+    verifyAttempts: 0,
     started: false,
     watchdog: null,
-    retries: 0,
     onDone,
   };
   uploads.set(key, uploadState);
-  sendNextChunk(uploadState);
+  pump(uploadState);
 }
 
 /** Handle an upload acknowledgement. The server echoes the written byte
- *  offset (`sftpWriteOk`); when absent (the old bare `sftpOk` protocol) the
- *  in-flight chunk's offset is assumed. Returns true when it advanced an
- *  upload (chunk acked); callers then do not run their own listing refresh. */
+ *  offset (`sftpWriteOk`); when absent (a bare `sftpOk`) the oldest in-flight
+ *  chunk is assumed. Returns true when it belonged to a tracked upload (chunk
+ *  acked); callers then do not run their own listing refresh. */
 export function onUploadAck(
   savedShell: number,
   savedPath: string,
@@ -459,30 +580,25 @@ export function onUploadAck(
   const up = uploads.get(uploadKey(savedShell, savedPath));
   if (!up) return false;
   // An ack for a finished upload (or one interleaved with the completion
-  // check) is not a chunk ack — there is no chunk in flight to associate it
+  // check) is not a chunk ack: there is no chunk in flight to associate it
   // with, and the offset echo is what keeps a bare `sftpOk` honest.
   if (up.verifying) return false;
-  // Which offset this ack refers to: the echo when available, otherwise the
-  // current in-flight chunk (backward-compatible with the old `sftpOk`).
-  const ackedOffset = offset ?? up.inFlightOffset;
-  if (ackedOffset === null) return false;
-  // Deduplicate: a retried chunk can produce two acks for the same offset.
-  if (up.ackedOffsets.has(ackedOffset)) return true;
-  up.ackedOffsets.add(ackedOffset);
-  clearWatchdog(up);
-  up.done += 1;
-  up.nextOffset = ackedOffset + up.inFlightLength;
-  up.inFlightOffset = null;
-  up.inFlightLength = 0;
-  updateTask(up.taskId, { done: up.nextOffset });
-  // Completion is decided by BYTES, never by the number of acks: a chunk that
-  // came back shorter than `UPLOAD_CHUNK` would otherwise let `ceil(size /
-  // UPLOAD_CHUNK)` acks arrive while the file is still short.
-  if (up.nextOffset >= up.total) {
-    sendUploadDone(up);
-  } else {
-    sendNextChunk(up);
+  const ackedOffset = offset ?? up.inflight[0]?.offset;
+  if (ackedOffset === undefined) return false;
+  // Find the chunk this ack belongs to. With several chunks in flight the
+  // offset echo is what identifies it — counting acks would mis-attribute a
+  // retried chunk's late ack to the wrong position.
+  const at = up.inflight.findIndex((chunk) => chunk.offset === ackedOffset);
+  if (at === -1) {
+    // Already acked (a duplicate ack for a retried chunk): report it as
+    // handled so nothing regresses, but do not advance progress twice.
+    return up.acked.has(ackedOffset / UPLOAD_CHUNK);
   }
+  const [chunk] = up.inflight.splice(at, 1);
+  up.acked.add(ackedOffset / UPLOAD_CHUNK);
+  up.ackedBytes += chunk.length;
+  updateTask(up.taskId, { done: up.ackedBytes });
+  pump(up);
   return true;
 }
 

@@ -500,6 +500,32 @@
       void pasteOnRightClick();
     });
 
+    // Files copied in the OS file manager (Explorer / Nautilus / Finder: Ctrl+C
+    // on a selection) arrive as a `paste` event whose `clipboardData.files`
+    // carries them — there is no other browser API for that gesture. Without
+    // this listener the event goes to the fork's own text-paste handler, which
+    // finds an empty `text/plain` and silently drops the files.
+    //
+    // Capture phase on purpose: it runs before the textarea's listener, so
+    // `stopPropagation()` keeps that handler out of a file-only paste (it must
+    // still handle text pastes untouched).
+    term.element?.addEventListener(
+      "paste",
+      (event: ClipboardEvent) => {
+        const data = event.clipboardData;
+        if (!data || data.files.length === 0) return;
+        const payload = readDropPayload(data);
+        if (payload.entries.length === 0 && payload.files.length === 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        term?.focus();
+        // Same path as a drop: the parent asks the shell for its pwd and
+        // uploads there (targets, toasts and the transfer panel all apply).
+        dispatch("dropfiles", { payload });
+      },
+      true,
+    );
+
     term.resize(cols, rows);
 
     loaded = true;

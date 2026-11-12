@@ -4,6 +4,58 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use sshweb_core::Sid;
 
+/// Deserialize a `u64` that the browser may have encoded as a CBOR **float**.
+///
+/// `cbor-x` encodes JavaScript numbers that do not fit in 32 bits as IEEE-754
+/// float64 (`fb 41f0…` for `4294967296`), not as CBOR uint64 — see
+/// `node_modules/cbor-x/encode.js`. That is invisible for small files, but the
+/// byte **offset of an upload chunk** crosses 2^32 as soon as the file passes
+/// 4 GiB, and the whole `sftpWriteAt` message was then rejected with
+/// `invalid type: floating point …, expected integer`. Worse, the decode error
+/// used to kill the WebSocket, so a large upload stalled at exactly 4 GiB and
+/// its watchdog retried the same offset until it gave up (已知坑 100).
+///
+/// JS numbers are exact integers up to 2^53, so accepting an integral float is
+/// lossless in the range that matters. Anything else (negative, fractional,
+/// NaN, or beyond 2^53) stays a protocol error.
+pub(crate) fn de_u64_from_number<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{Unexpected, Visitor};
+
+    /// Largest integer a JS `number` can hold exactly.
+    const MAX_EXACT: f64 = 9_007_199_254_740_992.0; // 2^53
+
+    struct NumberVisitor;
+
+    impl Visitor<'_> for NumberVisitor {
+        type Value = u64;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a non-negative integer (or an integral CBOR float)")
+        }
+
+        fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<u64, E> {
+            Ok(value)
+        }
+
+        fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<u64, E> {
+            u64::try_from(value).map_err(|_| E::invalid_value(Unexpected::Signed(value), &self))
+        }
+
+        fn visit_f64<E: serde::de::Error>(self, value: f64) -> Result<u64, E> {
+            if value.is_finite() && value >= 0.0 && value.fract() == 0.0 && value <= MAX_EXACT {
+                Ok(value as u64)
+            } else {
+                Err(E::invalid_value(Unexpected::Float(value), &self))
+            }
+        }
+    }
+
+    deserializer.deserialize_any(NumberVisitor)
+}
+
 /// Real-time message conveying the size of a terminal.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -123,12 +175,23 @@ pub enum WsClient {
     /// Write a file to a shell (create or overwrite).
     SftpWrite(Sid, String, Bytes),
     /// Write bytes at an offset (chunked upload). Offset 0 truncates the file.
-    SftpWriteAt(Sid, String, u64, Bytes),
+    /// The offset is carried as a JS number, so it may arrive as a CBOR float
+    /// once a file passes 4 GiB (`de_u64_from_number`, 已知坑 100).
+    SftpWriteAt(
+        Sid,
+        String,
+        #[serde(deserialize_with = "de_u64_from_number")] u64,
+        Bytes,
+    ),
     /// Every chunk of a chunked upload was written: `total` is the file size
     /// the client uploaded. The server verifies the on-disk size before
     /// acknowledging with [`WsServer::SftpUploadOk`], and deletes the partial
-    /// file instead when it does not match.
-    SftpUploadDone(Sid, String, u64),
+    /// file instead when it does not match. Same float caveat as `SftpWriteAt`.
+    SftpUploadDone(
+        Sid,
+        String,
+        #[serde(deserialize_with = "de_u64_from_number")] u64,
+    ),
     /// Give up on an in-flight chunked upload: the server deletes the partial
     /// file. Ordered through the same FIFO as the chunks, so the delete can
     /// never overtake a chunk still queued for that path (which would recreate
@@ -340,4 +403,88 @@ pub struct ProxyConfig {
     pub username: String,
     /// Proxy password, if any.
     pub password: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use ciborium::value::Value;
+
+    use super::*;
+
+    /// Build the CBOR a browser sends for `sftpWriteAt` with a given offset
+    /// value (so a test can choose float vs integer encoding).
+    fn write_at_messages(offset: Value) -> Vec<u8> {
+        let msg = Value::Map(vec![(
+            Value::Text("sftpWriteAt".into()),
+            Value::Array(vec![
+                Value::Integer(1.into()),
+                Value::Text("/tmp/f".into()),
+                offset,
+                Value::Bytes(vec![0x41]),
+            ]),
+        )]);
+        let mut buf = Vec::new();
+        ciborium::ser::into_writer(&msg, &mut buf).unwrap();
+        buf
+    }
+
+    fn decode(bytes: &[u8]) -> Result<WsClient, ciborium::de::Error<std::io::Error>> {
+        ciborium::de::from_reader(bytes)
+    }
+
+    #[test]
+    fn write_at_accepts_an_integer_offset() {
+        let bytes = write_at_messages(Value::Integer(4_194_304u64.into()));
+        match decode(&bytes).unwrap() {
+            WsClient::SftpWriteAt(sid, path, offset, data) => {
+                assert_eq!(sid, Sid(1));
+                assert_eq!(path, "/tmp/f");
+                assert_eq!(offset, 4_194_304);
+                assert_eq!(data.as_ref(), &[0x41]);
+            }
+            other => panic!("unexpected message: {other:?}"),
+        }
+    }
+
+    /// `cbor-x` turns every JS number >= 2^32 into a float64, so a chunked
+    /// upload past 4 GiB sends `offset` as a float. Rejecting that killed the
+    /// WebSocket and stalled every large upload (已知坑 100).
+    #[test]
+    fn write_at_accepts_a_float_encoded_offset() {
+        let bytes = write_at_messages(Value::Float(4_294_967_296.0));
+        match decode(&bytes).unwrap() {
+            WsClient::SftpWriteAt(_, _, offset, _) => assert_eq!(offset, 4_294_967_296),
+            other => panic!("unexpected message: {other:?}"),
+        }
+    }
+
+    /// The same encoding reaches `sftpUploadDone.total` when a file is exactly
+    /// a multiple of 4 GiB.
+    #[test]
+    fn upload_done_accepts_a_float_encoded_total() {
+        let msg = Value::Map(vec![(
+            Value::Text("sftpUploadDone".into()),
+            Value::Array(vec![
+                Value::Integer(2.into()),
+                Value::Text("/tmp/f".into()),
+                Value::Float(4_294_967_296.0),
+            ]),
+        )]);
+        let mut buf = Vec::new();
+        ciborium::ser::into_writer(&msg, &mut buf).unwrap();
+        match decode(&buf).unwrap() {
+            WsClient::SftpUploadDone(_, _, total) => assert_eq!(total, 4_294_967_296),
+            other => panic!("unexpected message: {other:?}"),
+        }
+    }
+
+    /// A float is only tolerated when it is an exact non-negative integer:
+    /// fractional or out-of-range values stay a protocol error.
+    #[test]
+    fn offset_still_rejects_non_integral_floats() {
+        for value in [1.5, -1.0, f64::NAN, 1e300] {
+            let bytes = write_at_messages(Value::Float(value));
+            assert!(decode(&bytes).is_err(), "float {value} must be rejected");
+        }
+    }
 }

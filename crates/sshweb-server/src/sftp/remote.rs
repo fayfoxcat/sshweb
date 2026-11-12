@@ -4,7 +4,7 @@
 //! `&mut self` API. Symbolic links are skipped and recursion is depth-capped
 //! in the walkers (see 已知坑 15/17).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
@@ -271,6 +271,47 @@ pub async fn mkdir_remote(pool: &SftpPool, server: &ServerConfig, path: &str) ->
     .await
 }
 
+/// Recover the real directory entry behind a path the client sent back.
+///
+/// The protocol carries paths as CBOR **text** (valid UTF-8), while SFTP names
+/// are arbitrary bytes. A name that is not valid UTF-8 is therefore rendered
+/// with U+FFFD replacement characters when listed (`to_string_lossy`, see
+/// [`list_remote`]), and sending that string back can never match the real
+/// entry: deleting or renaming such a row failed with `No such file or
+/// directory` even though it was right there in the list. That is not
+/// hypothetical — extracting a UTF-8-named zip with an old Info-ZIP `unzip`
+/// produces exactly such names (已知坑 101).
+///
+/// So: if the path resolves, use it as-is. Otherwise look in the parent
+/// directory for the entry whose **lossy** rendering equals the requested name
+/// — the exact inverse of how the listing produced it — and return that
+/// entry's raw path.
+async fn resolve_entry(client: &Sftp, path: &str) -> Result<PathBuf> {
+    let as_is = PathBuf::from(path);
+    if client.fs().symlink_metadata(&as_is).await.is_ok() {
+        return Ok(as_is);
+    }
+    let (Some(parent), Some(name)) = (as_is.parent(), as_is.file_name()) else {
+        return Ok(as_is);
+    };
+    if parent.as_os_str().is_empty() {
+        return Ok(as_is);
+    }
+    let want = name.to_string_lossy();
+    let mut fs = client.fs();
+    let Ok(dir) = fs.open_dir(parent).await else {
+        return Ok(as_is);
+    };
+    let rd = dir.read_dir();
+    futures_util::pin_mut!(rd);
+    while let Some(Ok(entry)) = rd.next().await {
+        if entry.filename().to_string_lossy() == want {
+            return Ok(parent.join(&*entry.filename()));
+        }
+    }
+    Ok(as_is)
+}
+
 /// Remove a file or directory on a remote SSH shell.
 pub async fn remove_remote(
     pool: &SftpPool,
@@ -280,16 +321,19 @@ pub async fn remove_remote(
 ) -> Result<()> {
     with_remote(pool, server, "SFTP remove failed", |sftp| async move {
         let result: Result<()> = async {
+            // Resolve first: the row may be a name that cannot round-trip
+            // through the text protocol (see [`resolve_entry`]).
+            let target = resolve_entry(&sftp, path).await?;
             if is_dir {
                 // Recursive delete: an SFTP `rmdir` only removes empty
                 // directories, so walk the tree depth-first (post-order) —
                 // delete children before the directory itself. Symlinks are
                 // skipped (never followed) and recursion is depth-capped,
                 // mirroring the archive/copy walkers (see 已知坑 15/17).
-                remove_tree(&sftp, path, 0).await
+                remove_tree(&sftp, &target, 0).await
             } else {
                 let mut fs = sftp.fs();
-                fs.remove_file(path)
+                fs.remove_file(&target)
                     .await
                     .map_err(|e| anyhow::anyhow!("{e}"))
             }
@@ -304,12 +348,16 @@ pub async fn remove_remote(
 /// then `path` itself. Symlinks are removed (not followed); depth is capped
 /// so a cyclic or pathologically deep tree can't run forever.
 ///
+/// Paths are [`Path`]s rather than `str` so child names keep their **raw**
+/// bytes (see [`resolve_entry`]); a lossy round trip through
+/// `format!("{path}/{name}")` would make a non-UTF-8 child undeletable.
+///
 /// Children are deleted **in parallel** (`join_all`): openssh-sftp-client
 /// processes concurrent requests on its internal queue, so a wide directory
 /// deletes far faster than one round-trip per entry (a 400-file dir exceeded
 /// the 30s hard timeout when serial). `Sftp` is `Send + Sync`, each child
 /// future owns its own `Fs`, so the concurrent futures are safe.
-async fn remove_tree(sftp: &Sftp, path: &str, depth: u32) -> Result<()> {
+async fn remove_tree(sftp: &Sftp, path: &Path, depth: u32) -> Result<()> {
     if depth > 32 {
         return Ok(());
     }
@@ -335,18 +383,19 @@ async fn remove_tree(sftp: &Sftp, path: &str, depth: u32) -> Result<()> {
     let mut children = Vec::new();
     while let Some(item) = rd.next().await {
         let entry = item.map_err(|e| anyhow::anyhow!("{e}"))?;
-        let name = entry.filename().to_string_lossy().into_owned();
-        if name == "." || name == ".." {
+        let name = entry.filename();
+        if name.to_string_lossy() == "." || name.to_string_lossy() == ".." {
             continue;
         }
-        children.push(format!("{path}/{name}"));
+        children.push(path.join(&*name));
     }
     // Delete children in parallel; each owns its own Fs. `remove_tree` borrows
-    // `child`, so wrap each in a future that owns the path string.
-    futures_util::future::join_all(children.into_iter().map(|child| {
-        let path = child.clone();
-        Box::pin(async move { remove_tree(sftp, &path, depth + 1).await })
-    }))
+    // `child`, so wrap each in a future that owns the path.
+    futures_util::future::join_all(
+        children
+            .into_iter()
+            .map(|child| Box::pin(async move { remove_tree(sftp, &child, depth + 1).await })),
+    )
     .await
     .into_iter()
     .collect::<Result<Vec<_>>>()?;
@@ -357,6 +406,10 @@ async fn remove_tree(sftp: &Sftp, path: &str, depth: u32) -> Result<()> {
 }
 
 /// Rename a file or directory on a remote SSH shell.
+///
+/// `from` goes through [`resolve_entry`] so a row whose name cannot round-trip
+/// through the text protocol can still be renamed; `to` is a new name chosen in
+/// the UI and must be used verbatim.
 pub async fn rename_remote(
     pool: &SftpPool,
     server: &ServerConfig,
@@ -364,8 +417,16 @@ pub async fn rename_remote(
     to: &str,
 ) -> Result<()> {
     with_remote(pool, server, "SFTP rename failed", |sftp| async move {
-        let mut fs = sftp.fs();
-        fs.rename(from, to).await
+        // `resolve_entry` is anyhow-typed while `fs.rename` is not, so the body
+        // is pinned to `anyhow::Result` explicitly.
+        let result: Result<()> = async {
+            let source = resolve_entry(&sftp, from).await?;
+            let mut fs = sftp.fs();
+            fs.rename(&source, to).await?;
+            Ok(())
+        }
+        .await;
+        result
     })
     .await
 }
@@ -576,7 +637,7 @@ async fn copy_file_stream(
             }
         };
         if is_dir {
-            remove_tree(client, dst, 0).await?;
+            remove_tree(client, Path::new(dst), 0).await?;
         }
     }
     let mut opts = client.options();

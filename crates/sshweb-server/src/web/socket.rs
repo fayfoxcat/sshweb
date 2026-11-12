@@ -72,13 +72,32 @@ fn encode(msg: WsServer) -> Result<Message> {
 }
 
 /// Receive a message from the client over WebSocket.
+///
+/// A payload that cannot be decoded is logged and **skipped**, not propagated:
+/// returning the error would tear down the whole connection, which is far worse
+/// than losing one message. A single dropped chunk is retried by the client's
+/// upload watchdog; a dropped connection aborts every in-flight operation on
+/// that session (已知坑 100 was exactly this: one rejected `sftpWriteAt` at the
+/// 4 GiB boundary killed the socket and stalled the upload).
 async fn recv(
     stream: &mut (impl StreamExt<Item = Result<Message, axum::Error>> + Unpin),
 ) -> Result<Option<WsClient>> {
     Ok(loop {
         match stream.next().await.transpose()? {
             Some(Message::Text(_)) => warn!("ignoring text message over WebSocket"),
-            Some(Message::Binary(msg)) => break Some(ciborium::de::from_reader(&*msg)?),
+            Some(Message::Binary(msg)) => match ciborium::de::from_reader::<WsClient, _>(&*msg) {
+                Ok(client) => break Some(client),
+                Err(err) => {
+                    // Truncated for the log: a rejected 4 MiB upload chunk would
+                    // otherwise dump megabytes of binary into the log line.
+                    warn!(
+                        len = msg.len(),
+                        head = %String::from_utf8_lossy(&msg[..msg.len().min(64)]),
+                        %err,
+                        "dropping undecodable client message"
+                    );
+                }
+            },
             Some(_) => (), // ignore other message types, keep looping
             None => break None,
         }
