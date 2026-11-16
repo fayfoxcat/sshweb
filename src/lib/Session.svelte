@@ -660,6 +660,7 @@
       on:openEditor={(event) =>
         openEditorByPath(event.detail.path, event.detail.sid)}
       on:sshInDir={(event) => openShellInDir(event.detail)}
+      on:locateActive={followActiveServer}
       on:followActive={followActiveServer}
     />
     <div class="relative flex-1 overflow-hidden">

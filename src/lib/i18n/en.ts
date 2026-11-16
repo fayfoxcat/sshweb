@@ -138,6 +138,9 @@ const en = {
   "file.titleRefresh": "Refresh",
   "file.titleEditPath": "Click to edit path",
   "file.titleClearSearch": "Clear search",
+  "file.titleLocate": "Jump to the current terminal directory",
+  "file.toastLocatedFail":
+    "Cannot locate it: the terminal has not reported a directory yet (a remote shell needs a prompt first)",
   "file.titleNewMenu": "Create a file or folder here",
   "file.titleUploadMenu": "Upload files to the current directory",
   "file.titleNewFile": "Create a file here",

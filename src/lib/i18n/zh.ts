@@ -140,6 +140,9 @@ const zh = {
   "file.titleRefresh": "刷新",
   "file.titleEditPath": "点击编辑路径",
   "file.titleClearSearch": "清除搜索",
+  "file.titleLocate": "定位到当前终端所在目录",
+  "file.toastLocatedFail":
+    "无法定位：终端还没报告当前目录（远端需先出现提示符）",
   "file.titleNewMenu": "在当前目录新建文件或文件夹",
   "file.titleUploadMenu": "上传文件或文件夹到当前目录",
   "file.titleNewFile": "在当前目录新建文件",

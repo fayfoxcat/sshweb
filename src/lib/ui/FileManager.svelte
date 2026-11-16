@@ -1,6 +1,12 @@
 <script lang="ts">
   import { createEventDispatcher, onMount } from "svelte";
-  import { FolderIcon, RefreshCwIcon, SearchIcon, XIcon } from "$lib/icons";
+  import {
+    FolderIcon,
+    LocateIcon,
+    RefreshCwIcon,
+    SearchIcon,
+    XIcon,
+  } from "$lib/icons";
 
   import type { WsClient, WsServer, WsSftpEntry } from "$lib/protocol";
   import { makeToast } from "$lib/toast";
@@ -42,6 +48,10 @@
     sshInDir: { dir: string; sid: number | null };
     openEditor: { path: string; sid: number };
     followActive: void;
+    /** Bind the panel to the active terminal's server (used by the locate
+     *  button when the view currently shows another server, so there is no
+     *  browse session to list the terminal's directory with). */
+    locateActive: void;
   }>();
 
   const join = joinPath;
@@ -138,6 +148,23 @@
     }
   }
 
+  /** A `pwdRequest` the locate button is waiting on (the active terminal's
+   *  sid), so replies meant for the drop-upload handshake are never mistaken
+   *  for it — and so the button can show it is working. */
+  let locatePending = $state<number | null>(null);
+  let locateTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Give up on an unanswered locate request (e.g. the terminal was closed
+   *  between the click and the reply) instead of spinning forever. */
+  const LOCATE_TIMEOUT_MS = 10000;
+
+  /** Set when a locate had to rebind the panel to the active terminal first:
+   *  the pwd is re-asked once that view is actually browsable. */
+  let relocateAfterBind = $state(false);
+
+  /** Whether the locate action has a terminal to ask and a view to jump. */
+  let canLocate = $derived(shellId !== null && activeKey !== null);
+  let locating = $derived(locatePending !== null);
+
   function applyBrowse(key: string, sid: number, targetPath: string) {
     const serverChanged = currentKey !== key;
     viewShellId = sid;
@@ -169,6 +196,8 @@
           applyBrowse(activeKey, saved.sid, saved.path);
         } else {
           saveView();
+          // The panel has no view of this server yet: the follow flow announces
+          // the browse start, and a locate that triggered it must resume there.
           dispatch("followActive");
         }
       }
@@ -177,6 +206,17 @@
 
   $effect(() => {
     if (viewShellId != null) saveView();
+  });
+
+  /** Resume a locate that had to rebind the panel first: as soon as the panel
+   *  really lists the active terminal's server, ask that terminal for its
+   *  directory again (the first reply would have been for the old view). */
+  $effect(() => {
+    if (!relocateAfterBind) return;
+    if (currentKey === null || viewShellId === null) return;
+    if (currentKey !== activeKey) return;
+    relocateAfterBind = false;
+    requestPwd();
   });
 
   $effect(() => {
@@ -247,6 +287,93 @@
   $effect(() => {
     if (viewShellId != null) writeSftpView(path, viewShellId);
   });
+
+  /** Ask the **active terminal** for its working directory: a local shell
+   *  answers from `/proc/<pid>/cwd`, a remote one from its prompt-parsed cwd.
+   *  Never ask the headless SFTP shell — it has no runner task, so a
+   *  `pwdRequest` sent to it would be dropped. The reply is routed to
+   *  `onPwd` → `jumpToTerminalDir`. */
+  function requestPwd() {
+    if (!srocket || shellId === null) {
+      makeToast({ kind: "info", message: t($lang, "file.toastLocatedFail") });
+      return;
+    }
+    clearLocateTimer();
+    locatePending = shellId;
+    locateTimer = setTimeout(() => {
+      locatePending = null;
+      locateTimer = null;
+    }, LOCATE_TIMEOUT_MS);
+    srocket.send({ pwdRequest: shellId });
+  }
+
+  function clearLocateTimer() {
+    if (locateTimer !== null) {
+      clearTimeout(locateTimer);
+      locateTimer = null;
+    }
+  }
+
+  /** `pwd` reply: the terminal's directory — jump the list there. */
+  function jumpToTerminalDir(replyShellId: number, replyPath: string) {
+    if (locatePending === null || replyShellId !== locatePending) return;
+    // The active tab may have switched servers while the request was in flight:
+    // then this path belongs to a shell the panel is no longer showing.
+    if (replyShellId !== shellId) {
+      locatePending = null;
+      clearLocateTimer();
+      return;
+    }
+    locatePending = null;
+    clearLocateTimer();
+    if (!replyPath) {
+      // An empty reply means "unknown": a remote shell whose prompt has not
+      // been parsed yet (or was never recognized). There is nothing to jump to.
+      makeToast({ kind: "info", message: t($lang, "file.toastLocatedFail") });
+      return;
+    }
+    revealDirectory(replyPath);
+  }
+
+  /** Jump the list to `targetPath`. When the panel already lists it, reload it
+   *  instead of re-navigating (a click that changes nothing would look broken);
+   *  otherwise navigate — first binding the panel to the active terminal if it
+   *  browsed another server, since an unbound view has no shell to list with. */
+  function revealDirectory(targetPath: string) {
+    if (activeKey === null) {
+      makeToast({ kind: "info", message: t($lang, "file.toastLocatedFail") });
+      return;
+    }
+    if (currentKey !== activeKey || viewShellId === null) {
+      // Remember the intent: `applyBrowse` (or the follow-active flow) calls
+      // back here once the panel actually browses the terminal's shell.
+      relocateAfterBind = true;
+      dispatch("locateActive");
+      return;
+    }
+    relocateAfterBind = false;
+    if (path === targetPath) {
+      refresh();
+      return;
+    }
+    navigateTo(targetPath, "history");
+  }
+
+  /** Reveal the current terminal's working directory in this list — the
+   *  IDE-style "scroll to the open file" action (button right of the search
+   *  box). Reuses the existing `pwdRequest` protocol: a local shell answers from
+   *  `/proc/<pid>/cwd`, a remote one from its prompt-parsed cwd. */
+  export function locateTerminalDir() {
+    if (!srocket || shellId === null || activeKey === null) return;
+    // Not bound to the terminal's server yet: bind first, then re-ask (the
+    // reply would otherwise be for a shell this panel is not listing).
+    if (currentKey !== activeKey || viewShellId === null) {
+      relocateAfterBind = true;
+      dispatch("locateActive");
+      return;
+    }
+    requestPwd();
+  }
 
   function refresh() {
     if (!srocket || viewShellId === null) return;
@@ -915,6 +1042,9 @@
       ) {
         resolvePendingList(list);
       }
+    } else if (message.pwd) {
+      const [replyShell, replyPath] = message.pwd;
+      jumpToTerminalDir(replyShell, replyPath);
     } else if (message.sftpOk) {
       applyAck(message.sftpOk);
     } else if (message.sftpWriteOk) {
@@ -1145,6 +1275,22 @@
         <XIcon size="12" />
       </button>
     {/if}
+    <!-- Locate the current terminal's directory (IDE-style "reveal in
+         explorer"): a target-in-crosshair glyph, right-most in the search row.
+         Disabled when there is no terminal to ask or the replay has not settled
+         (a stale shell id would ask a session that no longer exists). -->
+    <button
+      class="shrink-0 rounded p-1 text-zinc-500 transition-colors hover:bg-zinc-700/60 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+      onclick={locateTerminalDir}
+      disabled={!canLocate || !replaySettled}
+      title={t($lang, "file.titleLocate")}
+      aria-label={t($lang, "file.titleLocate")}
+    >
+      <LocateIcon
+        size="13"
+        class={locating ? "animate-spin text-indigo-300" : ""}
+      />
+    </button>
   </div>
 
   {#if listTruncated}

@@ -24,11 +24,12 @@ pub enum ShellData {
     Data(Vec<u8>),
     /// Resize the shell to a different number of rows and columns.
     Size(u32, u32),
-    /// Query the shell's current working directory. The runner injects
-    /// `stty -echo` then a marked OSC `printf` (echo stays off, so only a
-    /// harmless `stty -echo` line is echoed by readline — the printf itself
-    /// and its OSC output are invisible), parses the OSC, and replies with
-    /// [`crate::session::Session::report_pwd`].
+    /// Query the shell's current working directory. **Local** shells never
+    /// reach the runner: `Session::pwd_request` answers them from
+    /// `/proc/<pid>/cwd`. A **remote** shell answers from the prompt its runner
+    /// parsed (`feed_prompt_cwd`), through
+    /// [`crate::session::Session::report_pwd`] — zero terminal pollution, no
+    /// injected command.
     PwdRequest,
 }
 

@@ -292,6 +292,10 @@ export function createSessionRuntime(env: RuntimeEnv) {
       }
       if (message.pwd) {
         const [sid, path] = message.pwd;
+        // The file manager's "locate terminal directory" button listens for
+        // the same replies (需要和拖放上传的 pwd 握手共享这条通道,见 FileManager):
+        // the component decides by its own pending-request bookkeeping.
+        env.onFileMessage(message);
         env.onPwd(sid, path);
         return;
       }
