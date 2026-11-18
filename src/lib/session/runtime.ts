@@ -86,8 +86,21 @@ type RuntimeEnv = {
   onChunks: (shellId: number, chunks: Uint8Array[]) => void;
   /** Forward a bundle message to the file manager sidebar. */
   onFileMessage: (message: WsServer) => void;
+  /** A shell's shell history arrived (`commandHistory` reply): the 「命令片段」
+   *  sidebar's history mode. `notice` is set when the history file could not be
+   *  read at all. */
+  onCommandHistory: (
+    sid: number,
+    entries: string[],
+    notice: string | null,
+  ) => void;
   /** A shell reported its current working directory (`pwd` reply). */
   onPwd: (shellId: number, path: string) => void;
+  /** A `pong` arrived (reply to our `ping`): the link-quality probe times it. */
+  onPong: () => void;
+  /** The server reported a shell's SSH round trip (`latency` reply), in ms.
+   *  `null` = the probe timed out or the shell has no SSH hop. */
+  onLatency: (shellId: number, ms: number | null) => void;
   /** Editor-read interception: true when the `sftpData` was consumed. `sid` is
    *  the shell the editor belongs to (a path may exist on several servers). */
   routeEditorData: (sid: number, path: string, data: Uint8Array) => boolean;
@@ -297,6 +310,26 @@ export function createSessionRuntime(env: RuntimeEnv) {
         // the component decides by its own pending-request bookkeeping.
         env.onFileMessage(message);
         env.onPwd(sid, path);
+        return;
+      }
+      if (message.commandHistory) {
+        // The shell's history file (read server-side): routed to the snippet
+        // sidebar's history mode, which drops replies for a shell it is no
+        // longer showing.
+        const [sid, entries, notice] = message.commandHistory;
+        env.onCommandHistory(sid, entries, notice ?? null);
+        return;
+      }
+      if (message.pong !== undefined) {
+        // Link-quality probe reply: the component times it against its own
+        // send stamp (routed through the runtime so the socket stays in one
+        // place).
+        env.onPong();
+        return;
+      }
+      if (message.latency) {
+        const [sid, ms] = message.latency;
+        env.onLatency(sid, ms ?? null);
         return;
       }
       if (message.sftpList || message.error) {

@@ -81,6 +81,18 @@ impl From<anyhow::Error> for SftpConnectError {
     }
 }
 
+impl SftpConnectError {
+    /// Flatten to the underlying `anyhow` error, dropping the
+    /// `Connect`/`NoSftp` distinction. Used by callers that only report the
+    /// failure text (the shell-history reader) instead of handling the two
+    /// classes differently.
+    pub(crate) fn into_error(self) -> anyhow::Error {
+        match self {
+            SftpConnectError::Connect(err) | SftpConnectError::NoSftp { error: err, .. } => err,
+        }
+    }
+}
+
 impl SftpPool {
     /// A pool that passes the config store (host-key TOFU) to every SSH
     /// connect.

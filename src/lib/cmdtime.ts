@@ -61,6 +61,24 @@ export function isCommandLine(line: string): boolean {
   return end >= 0 && line.slice(end + 1).trim() !== "";
 }
 
+/** The command typed after the prompt on `line`, or `null` when the line is not
+ *  a prompt or nothing was typed.
+ *
+ *  Used by the 「命令片段」 sidebar to record what this page submitted (bash only
+ *  writes its history file when the shell exits, so the commands of the current
+ *  page have to be captured here to show up in history mode). The text is
+ *  trimmed of the shell's own trailing blanks; the prompt itself is dropped.
+ *
+ *  Two callers must agree on what counts as a submitted command, so this uses
+ *  exactly the same judgement as [`isCommandLine`] rather than a second,
+ *  slightly different rule. */
+export function commandOnLine(line: string): string | null {
+  const end = promptEndColumn(line);
+  if (end < 0) return null;
+  const command = line.slice(end + 1).trim();
+  return command === "" ? null : command;
+}
+
 const pad = (value: number) => String(value).padStart(2, "0");
 
 /** `YYYY-MM-DD HH:mm:ss` (19 cells), local time. */

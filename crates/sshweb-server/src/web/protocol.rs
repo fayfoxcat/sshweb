@@ -56,6 +56,61 @@ where
     deserializer.deserialize_any(NumberVisitor)
 }
 
+/// Deserialize an `f64` that the browser may have encoded as a CBOR
+/// **integer**.
+///
+/// `cbor-x` writes a JavaScript number as a CBOR integer whenever the value
+/// happens to be integral — and `performance.now()` does land on exact integers
+/// (measured: ~10 % of readings in Edge, where the clock is quantised to
+/// 100 µs and a reading of `12345.0` is written as `19 3039`). Serde's plain
+/// `f64` visitor then fails with `invalid type: integer 12345, expected float`,
+/// the whole `ping` message is dropped, and the latency light silently loses
+/// that sample — which is exactly how the round trip drifted to 2 s while the
+/// link was fine.
+///
+/// Integers are lossless as `f64` up to 2^53, and a millisecond timestamp is
+/// nowhere near that.
+pub(crate) fn de_f64_from_number<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{Unexpected, Visitor};
+
+    struct NumberVisitor;
+
+    impl Visitor<'_> for NumberVisitor {
+        type Value = f64;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a number (CBOR integer or float)")
+        }
+
+        fn visit_f64<E: serde::de::Error>(self, value: f64) -> Result<f64, E> {
+            Ok(value)
+        }
+
+        fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<f64, E> {
+            Ok(value as f64)
+        }
+
+        fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<f64, E> {
+            Ok(value as f64)
+        }
+
+        fn visit_i128<E: serde::de::Error>(self, _value: i128) -> Result<f64, E> {
+            // A 128-bit CBOR int is far outside any timestamp we send; refusing
+            // is honest (`as f64` would silently round to the nearest 2^53).
+            Err(E::invalid_value(Unexpected::Other("i128"), &self))
+        }
+
+        fn visit_u128<E: serde::de::Error>(self, _value: u128) -> Result<f64, E> {
+            Err(E::invalid_value(Unexpected::Other("u128"), &self))
+        }
+    }
+
+    deserializer.deserialize_any(NumberVisitor)
+}
+
 /// Real-time message conveying the size of a terminal.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -132,6 +187,29 @@ pub enum WsServer {
     /// frontend can show progress for large copies without flooding the
     /// output queue.
     SftpCopyProgress(Sid, String, u64),
+    /// Reply to a [`WsClient::CommandHistoryRequest`]: the shell's history
+    /// entries, **most recent first**, deduplicated and capped (see
+    /// `session::history`). The third element is a notice for the case where
+    /// the history file could not be read at all — an empty list *with* a
+    /// notice is an error, an empty list without one means the shell simply
+    /// has no history file yet.
+    CommandHistory(Sid, Vec<String>, Option<String>),
+    /// Reply to a [`WsClient::Ping`]: the client's own timestamp, echoed
+    /// verbatim. The browser measures `performance.now() - stamp`, i.e. the
+    /// **browser → server** round trip — the first half of what a keystroke
+    /// travels. The server does no work in between (the dispatch arm just
+    /// re-sends the number), so the figure is the socket, not the app.
+    Pong(f64),
+    /// Round trip **server → SSH target** for one shell, in milliseconds, as
+    /// measured by the keepalive ping the shell's runner sends once a second.
+    /// `None` when that shell has no SSH connection (local terminal: there is
+    /// no second hop). The nav-bar link light adds this to its own browser
+    /// measurement to show the full keystroke path.
+    ///
+    /// Published every second per remote shell (≈15 bytes/s); not replayed on
+    /// attach — the client is at most one tick behind and shows only its own
+    /// hop until the first value arrives.
+    Latency(Sid, Option<f64>),
 }
 
 /// A real-time message sent from the client over WebSocket.
@@ -209,6 +287,26 @@ pub enum WsClient {
     /// dragged file to the terminal's `pwd`). The runner answers from its
     /// prompt-parsed cwd and replies with [`WsServer::Pwd`].
     PwdRequest(Sid),
+    /// Read the shell's **shell history** (`~/.bash_history` / zsh / sh), for
+    /// the 「命令片段」 sidebar's history mode. The server reads the file on
+    /// the shell's host (local process or remote SFTP) and answers with
+    /// [`WsServer::CommandHistory`] — no command is injected into the
+    /// terminal, so this works for both local and remote shells.
+    CommandHistoryRequest(Sid),
+    /// Liveness/latency probe from the browser: the server answers with
+    /// [`WsServer::Pong`] carrying `stamp` unchanged. `stamp` is the browser's
+    /// `performance.now()`, an opaque number to the server.
+    ///
+    /// Deliberately **not** tied to a shell: what it measures is the
+    /// browser↔server socket, which is shared by every tab, so one probe per
+    /// page is enough — and it keeps working on an idle session with no
+    /// terminal at all.
+    ///
+    /// `de_f64_from_number` is **not optional**: `cbor-x` writes an integral
+    /// JavaScript number as a CBOR integer, and `performance.now()` is integral
+    /// roughly one reading in ten. A plain `f64` rejects those messages and the
+    /// sample silently vanishes (see the helper's doc).
+    Ping(#[serde(deserialize_with = "de_f64_from_number")] f64),
 }
 
 /// A single entry in an SFTP directory listing.

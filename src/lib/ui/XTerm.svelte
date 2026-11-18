@@ -59,6 +59,7 @@
   import { readDropPayload, type DropPayload } from "$lib/upload";
   import {
     COMMAND_TIME_GAP,
+    commandOnLine,
     commandTimeFor,
     isCommandLine,
   } from "$lib/cmdtime";
@@ -68,6 +69,11 @@
     data: Uint8Array;
     resize: { rows: number; cols: number };
     dropfiles: { payload: DropPayload };
+    /** A command was submitted with a plain Enter — the text the shell is about
+     *  to run, for the 「命令片段」 sidebar's history mode (`snippets.ts`). Not
+     *  emitted for Shift/Ctrl+Enter or Alt+Enter, which are the newline
+     *  escapes, and not on the alternate screen (vim/less/claude). */
+    submit: string;
   }>();
 
   interface Props {
@@ -185,6 +191,17 @@
     if (ready && active) claimFocus();
   });
 
+  /** Put the keyboard back into this terminal.
+   *
+   *  Used after the 「命令片段」 sidebar types a command in: the click landed on
+   *  the sidebar, so xterm's hidden textarea no longer has focus and the user
+   *  would otherwise have to click the terminal before pressing Enter. Safe to
+   *  call before the terminal exists (`term` is null then; the `ready` effect
+   *  focuses it once it does). */
+  export function focus() {
+    term?.focus();
+  }
+
   onMount(() => {
     const onResize = debounce(() => fit(), 150);
     window.addEventListener("resize", onResize);
@@ -286,7 +303,7 @@
    *  encodes it. Nothing here may change what is sent to the shell: no
    *  `preventDefault`, no `false` return, no write to the buffer. */
   function noteSubmit() {
-    if (!term || !$settings.commandTime) return;
+    if (!term) return;
     const buf = term.buffer.active;
     // Full-screen programs draw on the alternate buffer (vim/less, and agent
     // TUIs such as claude/pi while they hold the screen): their lines are not
@@ -306,6 +323,11 @@
     for (let r = first; r <= row; r++) {
       line += buf.getLine(r)?.translateToString(true) ?? "";
     }
+    // The sidebar's history mode records what this page submitted, whatever
+    // the stamp setting is — the history list is not a rendering option.
+    const command = commandOnLine(line);
+    if (command) dispatch("submit", command);
+    if (!$settings.commandTime) return;
     if (!isCommandLine(line)) return;
     // Everything below is in **cells**, never string indices: a command with
     // CJK in it makes the two disagree (`cursorX` already counts 2 for one).

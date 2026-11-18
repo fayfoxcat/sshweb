@@ -44,7 +44,32 @@ pub struct ServerSettings {
     /// 早于本字段的配置照常可读。
     #[serde(default)]
     pub local: LocalSettings,
+    /// 命令片段(「命令片段」侧栏里用户保存的命令),全局共享、不分服务器。
+    /// 与 `keys`/`host_keys` 同一个向后兼容约定:缺字段 = 空列表。
+    #[serde(default)]
+    pub snippets: Vec<CommandSnippet>,
 }
+
+/// 一条保存下来的命令片段:自动 id(前端生成 UUID,缺失时服务端补)+ 命令本身。
+///
+/// 只存命令原文,不存服务器/终端身份 —— 片段是**全局**的,同一个片段可以键入到
+/// 任意终端(见 开发记录文档 §四「命令片段」)。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandSnippet {
+    /// Stable identifier (browser-generated UUID); used as the list key and by
+    /// the delete/rename operations.
+    #[serde(default)]
+    pub id: String,
+    /// The command text as the user typed it (may span several lines).
+    pub command: String,
+}
+
+/// 命令片段数量上限(安全审查 M4 同思路:防止 PUT
+/// 一个无界列表把内存/配置文件撑爆)。
+const MAX_SNIPPETS: usize = 2000;
+/// 单条片段的字符数上限。命令片段是给人看的短命令,不是脚本仓库。
+const MAX_SNIPPET_CHARS: usize = 8000;
 
 /// The body of `PUT /api/config`, the browser's only settings write.
 ///
@@ -66,6 +91,13 @@ pub struct SaveSettingsRequest {
     /// 「本机」设置;`None` = 不改动已存的值。
     #[serde(default)]
     pub local: Option<LocalSettings>,
+    /// 命令片段;`None` = 不改动已存的值,`Some(vec![])` = **清空**。
+    ///
+    /// 与 `local` 同一个理由:删掉最后一条片段是合法操作,所以「没提到这一
+    /// 段」与「显式给空」必须能区分,不能用 `keys` 的「非空才合并」(那会把
+    /// 删除吃掉)。
+    #[serde(default)]
+    pub snippets: Option<Vec<CommandSnippet>>,
 }
 
 /// A persisted SSH keypair (Ed25519). The private key stays server-side inside
@@ -490,6 +522,10 @@ impl ConfigStore {
             if let Some(local) = settings.local {
                 state.settings.local = local;
             }
+            // 命令片段:与 `local` 同样的 `Option` 语义(删除最后一条 = 显式空列表)。
+            if let Some(snippets) = settings.snippets {
+                state.settings.snippets = normalize_snippets(snippets)?;
+            }
             self.persist(state)
         })
     }
@@ -876,6 +912,32 @@ fn validate_password(password: &str, confirmation: &str) -> Result<()> {
     Ok(())
 }
 
+/// 规整一次 `PUT /api/config` 带来的命令片段列表。
+///
+/// 三件事,都是**服务端**该做而前端不能保证的(前端可以旧版本、可以被改):
+/// 空白命令丢掉、缺 id 的补一个、超上限时报错而不是静默截断(静默截断会让用户
+/// 以为存上了)。顺序保持用户给的顺序(列表顺序就是侧栏显示顺序)。
+fn normalize_snippets(snippets: Vec<CommandSnippet>) -> Result<Vec<CommandSnippet>> {
+    if snippets.len() > MAX_SNIPPETS {
+        bail!("命令片段数量超过上限（{MAX_SNIPPETS}）");
+    }
+    Ok(snippets
+        .into_iter()
+        .filter_map(|mut s| {
+            if s.command.trim().is_empty() {
+                return None;
+            }
+            if s.command.chars().count() > MAX_SNIPPET_CHARS {
+                s.command = s.command.chars().take(MAX_SNIPPET_CHARS).collect();
+            }
+            if s.id.trim().is_empty() {
+                s.id = sshweb_core::rand_alphanumeric(16);
+            }
+            Some(s)
+        })
+        .collect())
+}
+
 fn derive_key(password: &str, salt: &[u8; SALT_BYTES]) -> Result<[u8; KEY_BYTES]> {
     let mut key = [0u8; KEY_BYTES];
     Argon2::default()
@@ -1129,6 +1191,127 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// 命令片段与 `local` 同一条 `Option` 语义(已知坑 81 的写法):缺省 =
+    /// 不改、显式空列表 = 清空。删掉最后一条片段是合法操作,若照抄 `keys` 的
+    /// 「非空才合并」,删除就会被静默吃掉。
+    #[test]
+    fn save_settings_merges_snippets_like_a_local_section() {
+        let dir = std::env::temp_dir().join(format!(
+            "sshweb-snippets-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = dir.join("config.enc");
+        let store = ConfigStore::new(path.clone()).unwrap();
+        let token = store.setup("123456", "123456").unwrap();
+        let cookie = format!("{COOKIE_NAME}={token}");
+
+        // 1. 缺省(旧标签页只带 servers)= 不动。
+        store
+            .save_settings(
+                Some(&cookie),
+                SaveSettingsRequest {
+                    servers: Vec::new(),
+                    keys: Vec::new(),
+                    local: None,
+                    snippets: None,
+                },
+            )
+            .unwrap();
+        assert!(store.settings(Some(&cookie)).unwrap().snippets.is_empty());
+
+        // 2. 显式给出即保存;空白命令被丢掉,缺 id 的补一个。
+        store
+            .save_settings(
+                Some(&cookie),
+                SaveSettingsRequest {
+                    servers: Vec::new(),
+                    keys: Vec::new(),
+                    local: None,
+                    snippets: Some(vec![
+                        CommandSnippet {
+                            id: "a".into(),
+                            command: "systemctl status nginx".into(),
+                        },
+                        CommandSnippet {
+                            id: String::new(),
+                            command: "df -h".into(),
+                        },
+                        CommandSnippet {
+                            id: "blank".into(),
+                            command: "   ".into(),
+                        },
+                    ]),
+                },
+            )
+            .unwrap();
+        let saved = store.settings(Some(&cookie)).unwrap().snippets;
+        assert_eq!(saved.len(), 2, "blank commands must be dropped");
+        assert_eq!(saved[0].command, "systemctl status nginx");
+        assert_eq!(saved[1].command, "df -h");
+        assert!(!saved[1].id.is_empty(), "a missing id must be filled in");
+
+        // 3. 显式空列表 = 清空(这是「删除最后一条」走的那条路)。
+        store
+            .save_settings(
+                Some(&cookie),
+                SaveSettingsRequest {
+                    servers: Vec::new(),
+                    keys: Vec::new(),
+                    local: None,
+                    snippets: Some(Vec::new()),
+                },
+            )
+            .unwrap();
+        assert!(store.settings(Some(&cookie)).unwrap().snippets.is_empty());
+
+        // 4. 真的落盘了:重新打开同一条路径的 store 仍然看到清空后的状态。
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 片段真的写进了加密文件:重开 store、用同一个密码登录后还在。
+    #[test]
+    fn snippets_survive_a_restart() {
+        let dir = std::env::temp_dir().join(format!(
+            "sshweb-snippets-restart-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = dir.join("config.enc");
+        let store = ConfigStore::new(path.clone()).unwrap();
+        let token = store.setup("123456", "123456").unwrap();
+        let cookie = format!("{COOKIE_NAME}={token}");
+        store
+            .save_settings(
+                Some(&cookie),
+                SaveSettingsRequest {
+                    servers: Vec::new(),
+                    keys: Vec::new(),
+                    local: None,
+                    snippets: Some(vec![CommandSnippet {
+                        id: "x".into(),
+                        command: "tail -f /var/log/syslog".into(),
+                    }]),
+                },
+            )
+            .unwrap();
+
+        let reopened = ConfigStore::new(path).unwrap();
+        let token = reopened.login("123456").unwrap();
+        let cookie = format!("{COOKIE_NAME}={token}");
+        let snippets = reopened.settings(Some(&cookie)).unwrap().snippets;
+        assert_eq!(snippets.len(), 1);
+        assert_eq!(snippets[0].command, "tail -f /var/log/syslog");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// The partial merge in [`ConfigStore::save_settings`] (已知坑 81): a
     /// section the payload does not mention must survive, and only an explicit
     /// value overwrites it. This is a pure invariant no browser test can prove
@@ -1164,6 +1347,7 @@ mod tests {
                         home: "/data/app".into(),
                         socks5_tunnel: None,
                     }),
+                    snippets: None,
                 },
             )
             .unwrap();
@@ -1178,6 +1362,7 @@ mod tests {
                     servers: Vec::new(),
                     keys: Vec::new(),
                     local: None,
+                    snippets: None,
                 },
             )
             .unwrap();
@@ -1193,6 +1378,7 @@ mod tests {
                     servers: Vec::new(),
                     keys: Vec::new(),
                     local: Some(LocalSettings::default()),
+                    snippets: None,
                 },
             )
             .unwrap();
@@ -1208,6 +1394,7 @@ mod tests {
                     servers: Vec::new(),
                     keys: Vec::new(),
                     local: None,
+                    snippets: None,
                 },
             )
             .unwrap();

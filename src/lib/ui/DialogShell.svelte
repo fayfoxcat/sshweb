@@ -11,6 +11,10 @@
     danger?: boolean;
     /** Optional secondary action between cancel and confirm (e.g. "跳过"). */
     middleText?: string;
+    /** Max-width class of the card. The default is the compact confirm shape;
+     *  a dialog with a real form in it (the snippet editor) passes a wider
+     *  one. Kept a class (not a pixel style) so it stays on the app's scale. */
+    widthClass?: string;
     onConfirm?: () => void;
     onMiddle?: () => void;
     onCancel?: () => void;
@@ -23,6 +27,7 @@
     confirmText = "",
     danger = false,
     middleText = "",
+    widthClass = "max-w-sm",
     onConfirm = () => {},
     onMiddle = () => {},
     onCancel = () => {},
@@ -31,7 +36,7 @@
 </script>
 
 <div
-  class="relative w-full max-w-sm rounded-lg border border-zinc-700 bg-zinc-900 p-5 shadow-2xl"
+  class="relative w-full {widthClass} rounded-lg border border-zinc-700 bg-zinc-900 p-5 shadow-2xl"
 >
   <div class="flex items-start justify-between">
     <h3 class="text-base font-medium text-zinc-100">{title}</h3>

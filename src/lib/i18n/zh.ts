@@ -99,6 +99,9 @@ const zh = {
   "session.newTerminal": "新建终端",
   "session.connected": "已连接",
   "session.disconnected": "已断开",
+  "session.latencyTotal": "往返 {ms} ms",
+  "session.latencyParts": "浏览器 {server} ms + SSH {remote} ms",
+  "session.latencyLocal": "本机终端，无 SSH 一跳",
 
   // Server stats bar
   "stats.cpu": "CPU",
@@ -330,6 +333,44 @@ const zh = {
   "servers.startupDirPlaceholder": "留空 = 用户主目录,如 /data/app",
   "servers.startupDirDesc":
     "启动目录，留空为该 SSH 用户的主目录;支持绝对/相对路径",
+
+  // 命令片段侧栏
+  "session.titleSnippets": "命令片段",
+  "snippet.add": "新增命令",
+  "snippet.addHint": "保存一条常用命令",
+  "snippet.history": "历史命令",
+  "snippet.historyHint": "切换到当前终端的历史命令",
+  "snippet.back": "我的命令",
+  "snippet.backHint": "切换回已保存的命令片段",
+  "snippet.refreshHistory": "重新读取历史命令",
+  "snippet.search": "从 {n} 条命令搜索命令片段…",
+  "snippet.searchHistory": "从 {n} 条历史命令搜索…",
+  "snippet.clearSearch": "清除搜索",
+  "snippet.empty": "还没有保存的命令，点「新增命令」添加。",
+  "snippet.noMatch": "没有匹配的命令。",
+  "snippet.typeHint": "键入到当前终端（不回车）",
+  "snippet.editHint": "双击编辑这条命令",
+  "snippet.deleteHint": "删除这条命令",
+  "snippet.deleted": "已删除命令「{command}」",
+  "snippet.undo": "撤销",
+  "snippet.addFromHistory": "添加到我的命令",
+  "snippet.added": "命令已保存。",
+  "snippet.updated": "命令已更新。",
+  "snippet.noTerminal": "没有可键入的终端，请先打开一个终端。",
+  "snippet.historyEmpty": "当前终端还没有历史命令。",
+  "snippet.historyFail": "读取历史命令失败，可点刷新重试。",
+  "snippet.historyLoading": "正在读取历史命令…",
+  "snippet.dialogTitle": "新增命令",
+  "snippet.editTitle": "编辑命令",
+  "snippet.dialogMessage":
+    "保存一条命令，之后可在「命令片段」里一键键入到任意终端。",
+  "snippet.editMessage": "修改后按「保存」覆盖原命令，双击卡片随时可再编辑。",
+  "snippet.dialogPlaceholder": "例如：systemctl status nginx --no-pager",
+  "snippet.dialogHint":
+    "支持多行（Ctrl+Enter 保存）。键入时换行会被折叠为空格，命令不会自动执行。",
+  "snippet.dialogConfirm": "保存",
+  "snippet.dialogEmpty": "命令不能为空。",
+  "snippet.dialogTooLong": "命令过长（上限 {n} 个字符）。",
 
   // Editor
   "editor.close": "关闭",

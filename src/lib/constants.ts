@@ -37,6 +37,12 @@ export const TOOLTIP_DELAY_MS = 500;
 /** Server-stats polling interval (ms). */
 export const STATS_POLL_MS = 1000;
 
+/** Link-quality probe interval (ms). One second, matching the server-side SSH
+ *  ping cadence: the nav-bar light then reacts to a degrading link within a
+ *  couple of seconds (the consumer smooths the samples, so a faster timer would
+ *  only add noise). */
+export const LATENCY_PING_MS = 1000;
+
 /** WebSocket reconnect delay after a disconnect (ms). */
 export const RECONNECT_DELAY_MS = 500;
 
@@ -121,5 +127,10 @@ export const EDITOR_DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 export const SFTP_VIEW_STORAGE_KEY = "sshweb-sftp-view";
 
 /** sessionStorage key for which side panel is open ("servers" | "files" |
- *  null), restored after a refresh. */
+ *  "snippets" | null), restored after a refresh. */
 export const PANEL_STORAGE_KEY = "sshweb-panel";
+
+/** Max length (chars) of a saved command snippet, mirrored by the server's
+ *  `MAX_SNIPPET_CHARS` (`config.rs`). Longer input is rejected in the dialog
+ *  rather than silently truncated. */
+export const MAX_SNIPPET_CHARS = 8000;

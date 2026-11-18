@@ -16,7 +16,7 @@ use tracing::{debug, trace};
 use crate::session::Session;
 use crate::ssh;
 use crate::terminal::Terminal;
-use crate::web::protocol::{LocalSettings, ServerConfig};
+use crate::web::protocol::{LocalSettings, ServerConfig, WsServer};
 
 /// Internal message routed to shell runners.
 pub enum ShellData {
@@ -220,6 +220,16 @@ pub async fn ssh_task(
             debug!(%id, ?err, "remote stats channel unavailable");
         }
     }
+
+    // Latency probe for the nav bar's link light: one keepalive ping per second
+    // on this connection, timing the pong. `handle` is `Sync`, so the task can
+    // hold it while the shell loop below keeps using channels off the same
+    // connection (the two never interleave packets by hand — russh serializes).
+    tokio::spawn(probe_remote_latency(
+        id,
+        Arc::new(handle),
+        Arc::clone(&session),
+    ));
 
     let (mut read_half, write_half) = channel.split();
 
@@ -481,6 +491,70 @@ fn user_switch_line(line: &str) -> Option<&str> {
         switch_user_from_tokens(&tokens)
     } else {
         None
+    }
+}
+
+/// Interval between the keepalive pings that measure the server → SSH target
+/// round trip. One second, matching the client's own probe and the stats
+/// cadence: the light then reacts to a degrading link within a couple of
+/// seconds, and a per-second global request is negligible next to the
+/// terminal's own traffic (OpenSSH's default keepalive is tens of seconds
+/// precisely because it only cares about liveness — here the number *is* the
+/// feature, so smoothing has to come from the consumer, not a slower probe).
+const LATENCY_PROBE_INTERVAL: Duration = Duration::from_secs(1);
+
+/// Upper bound on one ping: a pong that takes longer than this is reported as
+/// "no measurement" rather than as a huge latency, so a stalled link cannot
+/// pin the task or leave a 30-second value frozen on the nav bar.
+const LATENCY_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Measure the server → SSH target round trip once a second and publish it for
+/// the nav-bar link light ([`WsServer::Latency`]).
+///
+/// Uses `keepalive@openssh.com` with `want_reply`, which every sshd answers
+/// (and russh resolves the reply through a oneshot, so the timing is the wire,
+/// not a poll). Deliberately **not** `send_keepalive(false)`: without a reply
+/// there is nothing to time, and the connection's own 30 s keepalive already
+/// covers liveness (坑 in `make_config`). A timed-out probe publishes `None`
+/// and keeps going — the light falls back to "unknown" instead of lying.
+///
+/// The task ends when the connection is closed or the shell is gone; it holds
+/// only the `Handle` (cheap), so it cannot keep a dead session alive.
+async fn probe_remote_latency(
+    id: Sid,
+    handle: Arc<russh::client::Handle<crate::ssh::SshHandler>>,
+    session: Arc<Session>,
+) {
+    loop {
+        let started = std::time::Instant::now();
+        let pong = tokio::time::timeout(LATENCY_PROBE_TIMEOUT, handle.send_ping()).await;
+        let ms = match pong {
+            Ok(Ok(())) => {
+                let ms = started.elapsed().as_secs_f64() * 1000.0;
+                session.send(WsServer::Latency(id, Some(ms)));
+                Some(ms)
+            }
+            Ok(Err(err)) => {
+                // The connection is gone (channel closed). The shell task will
+                // notice on its own; stop probing so we don't spin.
+                debug!(%id, ?err, "latency probe stopped: connection closed");
+                session.send(WsServer::Latency(id, None));
+                break;
+            }
+            Err(_) => {
+                debug!(%id, "latency probe timed out");
+                session.send(WsServer::Latency(id, None));
+                None
+            }
+        };
+        if !session.has_shell(id) {
+            debug!(%id, "latency probe stopped: shell removed");
+            break;
+        }
+        if ms.is_none() && handle.is_closed() {
+            break;
+        }
+        tokio::time::sleep(LATENCY_PROBE_INTERVAL).await;
     }
 }
 

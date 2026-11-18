@@ -9,8 +9,10 @@
 //!
 //! Shell lifecycle, input routing and stats live here; SFTP orchestration is
 //! in [`sftp_ops`] (remote = openssh-sftp-client pool + hard timeout, local =
-//! blocking `std::fs` on a background thread).
+//! blocking `std::fs` on a background thread), and the shell-history reader
+//! behind 「命令片段」 is in [`history`].
 
+mod history;
 mod sftp_ops;
 
 use std::collections::VecDeque;

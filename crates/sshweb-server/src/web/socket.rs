@@ -152,7 +152,7 @@ async fn handle_socket(
                 }
                 result = recv(&mut stream) => {
                     match result? {
-                        Some(msg) => dispatch(&session_owned, msg),
+                        Some(msg) => dispatch(&session_owned, msg, &out_tx),
                         None => break Ok(()),
                     }
                 }
@@ -187,7 +187,16 @@ where
 /// Dispatch a single client message. All slow operations are spawned onto
 /// separate tasks; nothing here awaits on network/file I/O. Errors use the
 /// same bounded output queue as other server messages.
-fn dispatch(session: &Arc<Session>, msg: WsClient) {
+///
+/// `pong_tx` is the **per-connection** direct channel (see `handle_socket`).
+/// The `Pong` reply must not go through [`Session::send`], which clones one
+/// message into *every* attached subscriber: with two tabs of the same session
+/// open, each page then receives the other page's pongs as well, pairs them
+/// with its own older stamps and reports a round trip inflated by a multiple of
+/// the 1 s probe interval (the classic symptom is "≈2000 ms but the terminal
+/// feels fine"). Measured directly: one `ping` produced a `pong` on both
+/// sockets.
+fn dispatch(session: &Arc<Session>, msg: WsClient, pong_tx: &mpsc::Sender<WsServer>) {
     match msg {
         WsClient::Create(x, y, server, cwd, label) => {
             if let Err(e) = session.create_shell(x, y, server, cwd, label.unwrap_or_default()) {
@@ -240,6 +249,26 @@ fn dispatch(session: &Arc<Session>, msg: WsClient) {
         }
         WsClient::PwdRequest(id) => {
             session.pwd_request(id);
+        }
+        WsClient::CommandHistoryRequest(id) => {
+            // Reads the shell's history file (local: `std::fs` off-thread;
+            // remote: SFTP) — a network/disk operation, so it must not run in
+            // the message loop (坑 12). The reply carries its own `notice`
+            // instead of an `error`, so the sidebar always gets an answer.
+            spawn_op(session, "读取历史命令失败", move |s| async move {
+                s.command_history(id).await;
+                Ok(())
+            });
+        }
+        WsClient::Ping(stamp) => {
+            // Echo the browser's own clock reading: the RTT is measured on the
+            // side that can time it. No awaits, no allocation beyond the
+            // message — this arm must stay as cheap as it is, or the number it
+            // produces measures the server rather than the link.
+            //
+            // Reply on **this socket only** (`pong_tx`, not
+            // `Session::send` — see the doc above).
+            let _ = pong_tx.try_send(WsServer::Pong(stamp));
         }
         WsClient::SftpList(id, path) => {
             spawn_op(session, "列表失败", move |s| async move {

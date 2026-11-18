@@ -6,6 +6,7 @@ import { tr } from "./i18n";
 import { clearLegacyServers, readLegacyServers } from "./legacy";
 import { uuid } from "./uuid";
 import type {
+  CommandSnippet,
   WsJumpHost,
   WsProxyConfig,
   WsServerConfig,
@@ -52,6 +53,9 @@ export type LocalSettings = {
 export type ServerSettings = {
   servers: ServerConfig[];
   local: LocalSettings;
+  /** 命令片段（「命令片段」侧栏里保存的命令）。**全局共享**、不分服务器；
+   *  服务端存在加密配置的 `snippets` 段里（`config.rs::CommandSnippet`）。 */
+  snippets: CommandSnippet[];
 };
 
 /** A blank 「本机」设置，matching the server's own defaults. */
@@ -77,6 +81,7 @@ function localSettings(values?: {
 const serverStore = writable<ServerSettings>({
   servers: [],
   local: defaultLocalSettings(),
+  snippets: [],
 });
 
 /** Authenticated server configurations. No SSH secrets are persisted in the browser. */
@@ -221,6 +226,7 @@ export function effectivePassword(inputPwd: string, savedPwd: string): string {
 type SettingsPayload = {
   servers?: Array<WsServerConfig & { id: string }>;
   local?: Parameters<typeof localSettings>[0];
+  snippets?: CommandSnippet[];
 };
 
 /** Normalize the settings payload from the API. Every section the store holds
@@ -230,7 +236,19 @@ function normalizeSettings(value: SettingsPayload): ServerSettings {
   const configs = Array.isArray(value.servers)
     ? value.servers.map(serverConfig)
     : [];
-  return { servers: configs, local: localSettings(value.local) };
+  // A snippet without a usable id or command is not renderable: drop it here
+  // rather than letting an empty card into the sidebar.
+  const snippets = (Array.isArray(value.snippets) ? value.snippets : [])
+    .filter(
+      (s): s is CommandSnippet =>
+        Boolean(s) && typeof s.command === "string" && s.command.trim() !== "",
+    )
+    .map((s) => ({ id: s.id || uuid(), command: s.command }));
+  return {
+    servers: configs,
+    local: localSettings(value.local),
+    snippets,
+  };
 }
 
 async function persist(next: ServerSettings): Promise<void> {
@@ -333,6 +351,60 @@ export async function deleteServer(id: string): Promise<void> {
 export async function updateLocalSettings(local: LocalSettings): Promise<void> {
   const current = get(serverStore);
   await persist({ ...current, local });
+}
+
+/** Append a saved command snippet and persist it. The whole store goes back for
+ *  the same reason as [`updateLocalSettings`]: `PUT /api/config` is a partial
+ *  merge, and a payload that omits a section must not be the one that drops it
+ *  (已知坑 81). Resolves the stored snippet (it carries the generated id). */
+export async function addSnippet(command: string): Promise<CommandSnippet> {
+  const current = get(serverStore);
+  const snippet: CommandSnippet = { id: uuid(), command };
+  await persist({ ...current, snippets: [...current.snippets, snippet] });
+  return snippet;
+}
+
+/** Replace one saved snippet's command in place and persist. Keeps the id so a
+ *  card being edited stays the same card (and so any toast/undo referencing the
+ *  old text still resolves). The whole store goes back for the same reason as
+ *  [`addSnippet`] (已知坑 81). */
+export async function updateSnippet(
+  id: string,
+  command: string,
+): Promise<void> {
+  const current = get(serverStore);
+  if (!current.snippets.some((snippet) => snippet.id === id)) return;
+  await persist({
+    ...current,
+    snippets: current.snippets.map((snippet) =>
+      snippet.id === id ? { ...snippet, command } : snippet,
+    ),
+  });
+}
+
+/** Delete one saved snippet by id and persist. Deleting the last snippet sends
+ *  an explicit empty list — the server distinguishes that from "section
+ *  omitted", so the deletion sticks (see `config.rs::SaveSettingsRequest`). */
+export async function deleteSnippet(id: string): Promise<void> {
+  const current = get(serverStore);
+  await persist({
+    ...current,
+    snippets: current.snippets.filter((snippet) => snippet.id !== id),
+  });
+}
+
+/** Put a deleted snippet back at the position it had, for the delete toast's
+ *  undo action. Re-inserted by index (not appended) so undo restores the list
+ *  the user was looking at instead of moving the card to the end. */
+export async function restoreSnippet(
+  snippet: CommandSnippet,
+  index: number,
+): Promise<void> {
+  const current = get(serverStore);
+  if (current.snippets.some((s) => s.id === snippet.id)) return;
+  const next = [...current.snippets];
+  next.splice(Math.max(0, Math.min(index, next.length)), 0, snippet);
+  await persist({ ...current, snippets: next });
 }
 
 /** Duplicate a server, appending a visible copy suffix. */

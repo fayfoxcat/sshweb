@@ -56,6 +56,17 @@ export type WsServer = {
   /** Progress of an in-flight remote `sftpCopy`: [shell, source path,
    *  cumulative bytes copied so far], sent throttled for the progress line. */
   sftpCopyProgress?: [Sid, string, number];
+  /** Reply to a `commandHistoryRequest`: the shell's history entries, **most
+   *  recent first**, deduplicated and capped, plus a notice when the history
+   *  file could not be read at all (an empty list *with* a notice is an error;
+   *  an empty list without one means the shell has no history file yet). */
+  commandHistory?: [Sid, string[], string | null];
+  /** Reply to a `ping`: the browser's own timestamp echoed back. The client
+   *  measures its round trip (see `session/latency.ts`). */
+  pong?: number;
+  /** Server → SSH target round trip for a shell, in milliseconds. `null` when
+   *  that shell has no SSH hop (local terminal) or the probe is unanswered. */
+  latency?: [Sid, number | null];
   error?: string;
 };
 
@@ -154,4 +165,21 @@ export type WsClient = {
   /** Ask a shell for its current working directory (for uploading a dragged
    *  file to the terminal's `pwd`). The server replies with `pwd`. */
   pwdRequest?: Sid;
+  /** Ask the server for the shell's shell history (the 「命令片段」 sidebar's
+   *  history mode). The server reads the history file on the shell's host and
+   *  replies with `commandHistory`. */
+  commandHistoryRequest?: Sid;
+  /** Liveness/latency probe: the server echoes the number back as `pong`. The
+   *  number is `performance.now()` — opaque to the server. Not tied to a shell:
+   *  it measures the shared browser↔server socket only. */
+  ping?: number;
+};
+
+/** A command saved in the 「命令片段」 sidebar, stored server-side in the
+ *  encrypted config (global: the same snippet types into any terminal). */
+export type CommandSnippet = {
+  /** Stable identifier (browser-generated UUID). */
+  id: string;
+  /** The command text as the user typed it (may span several lines). */
+  command: string;
 };

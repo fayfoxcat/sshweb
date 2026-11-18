@@ -1,6 +1,12 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from "svelte";
-  import { FolderIcon, PlusIcon, ServerIcon, SettingsIcon } from "$lib/icons";
+  import {
+    FolderIcon,
+    PlusIcon,
+    ScrollTextIcon,
+    ServerIcon,
+    SettingsIcon,
+  } from "$lib/icons";
 
   import { get } from "svelte/store";
 
@@ -22,7 +28,9 @@
   import { createEditors, editorKey, loadEditorState } from "./session/editors";
   import { readSftpView } from "./sftpView";
   import { createSessionRuntime } from "./session/runtime";
+  import { createLinkQuality, displayMs } from "./session/latency";
   import { createStatsPolling } from "./session/stats";
+  import { clearSessionCommands, recordSessionCommand } from "./snippets";
   import { storageGet, storageSet } from "./storage";
   import { uuid } from "./uuid";
   import themes from "./ui/themes";
@@ -32,6 +40,7 @@
   import XTerm from "./ui/XTerm.svelte";
   import Editor from "./ui/Editor.svelte";
   import FileManager from "./ui/FileManager.svelte";
+  import SnippetPanel from "./ui/SnippetPanel.svelte";
   import Servers from "./ui/Servers.svelte";
   import ServerStats from "./ui/ServerStats.svelte";
   import Settings from "./ui/Settings.svelte";
@@ -48,24 +57,42 @@
   let authProbeAt = $state(0);
   let authProbe: Promise<void> | null = null;
   let settingsOpen = $state(false);
-  let openPanel = $state<"servers" | "files" | null>(
-    storageGet<"servers" | "files" | null>(PANEL_STORAGE_KEY, null, (raw) => {
-      const v = JSON.parse(raw) as string;
-      return v === "servers" || v === "files" ? v : null;
-    }),
+  let openPanel = $state<"servers" | "files" | "snippets" | null>(
+    storageGet<"servers" | "files" | "snippets" | null>(
+      PANEL_STORAGE_KEY,
+      null,
+      (raw) => {
+        const v = JSON.parse(raw) as string;
+        return v === "servers" || v === "files" || v === "snippets" ? v : null;
+      },
+    ),
   );
 
   let serversOpen = $derived(openPanel === "servers");
   let fileManagerOpen = $derived(openPanel === "files");
+  let snippetsOpen = $derived(openPanel === "snippets");
 
   $effect(() => {
     storageSet(PANEL_STORAGE_KEY, openPanel);
   });
 
   let fileManager: any;
+  let snippetPanel: any;
 
   const writers: Record<number, (data: string) => void> = {};
   const locks: Record<number, any> = {};
+  /** Terminal component refs, so the snippet panel can hand the keyboard back
+   *  after typing a command in (`focusTerminal`). */
+  const termRefs: Record<number, any> = {};
+  /** Shells seen on the last `shells` snapshot, so the cleanup effect above can
+   *  tell which ones were closed (a `$state` record would re-run it forever). */
+  const recordedShells: Record<number, true> = {};
+
+  /** Link-quality probe: browser↔server ping every second, graded together with
+   *  the server's per-shell SSH round trip. Created before `rt` because the
+   *  runtime's `onPong` / `onLatency` route straight into it. */
+  const linkQuality = createLinkQuality();
+  const link = linkQuality.store;
 
   const rt = createSessionRuntime({
     send: (msg) => srocket?.send(msg),
@@ -83,6 +110,8 @@
       });
     },
     onFileMessage: (message) => fileManager?.handleMessage(message),
+    onCommandHistory: (sid, entries, notice) =>
+      snippetPanel?.handleHistory(sid, entries, notice),
     onPwd: (shellId, path) => {
       const pending = pendingPwdUploads.get(shellId);
       if (pending && path) {
@@ -92,6 +121,8 @@
         pendingPwdUploads.delete(shellId);
       }
     },
+    onPong: () => linkQuality.onPong(),
+    onLatency: (shellId, ms) => linkQuality.onLatencyRemote(shellId, ms),
     routeEditorData: (sid, path, data) => {
       const key = editorKey(sid, path);
       if (pendingReads.has(key) && openEditors.includes(key)) {
@@ -217,8 +248,6 @@
     }
   }
 
-  let linkOk = $derived(connected && shells.length > 0);
-
   $effect(() => {
     if (connected && srocket && activeId >= 0) {
       rt.send({ setActive: activeId });
@@ -259,6 +288,94 @@
     statsPolling.prune(shells.map(([sid]) => sid));
   });
 
+  /** Keep the link-quality probe pointed at the active tab: its SSH hop is the
+   *  one being graded. A tab with no server config (local shell) grades only
+   *  the browser hop. */
+  $effect(() => {
+    linkQuality.setActiveShell(activeId >= 0 ? activeId : null);
+  });
+
+  /** Start/stop the browser-side probes with the socket, and republish
+   *  `"down"` the moment it drops so the light cannot stay green while the
+   *  connection is gone. */
+  $effect(() => {
+    const up = connected;
+    if (up) {
+      linkQuality.start(() => rt.send({ ping: performance.now() }));
+    } else {
+      linkQuality.stop();
+    }
+    linkQuality.setConnected(up);
+  });
+
+  /** Drop per-shell caches when a terminal is closed: its recorded commands
+   *  (`snippets.ts`) would otherwise leak for the lifetime of the page. */
+  $effect(() => {
+    const open = new Set(shells.map(([sid]) => sid));
+    for (const sid of Object.keys(recordedShells)) {
+      if (!open.has(Number(sid))) {
+        clearSessionCommands(Number(sid));
+        delete recordedShells[Number(sid)];
+        delete termRefs[Number(sid)];
+      }
+    }
+    for (const sid of open) recordedShells[sid] = true;
+  });
+
+  /** Tab visibility changed: let the probe resume/suspend (see `latency.ts`). */
+  function onVisibilityChange() {
+    linkQuality.onVisibilityChange();
+  }
+
+  /** Dot colour per link grade. Kept as plain CSS values (not Tailwind classes)
+   *  because the grade is dynamic and the glow must match the fill exactly —
+   *  `class:` variants per grade would need four pairs kept in sync. */
+  const LINK_COLORS: Record<string, string> = {
+    good: "rgb(16,185,129)", // emerald-500
+    fair: "rgb(234,179,8)", // yellow-500
+    poor: "rgb(249,115,22)", // orange-500
+    bad: "rgb(239,68,68)", // red-500
+    down: "rgb(239,68,68)", // red-500
+  };
+
+  function linkColor(quality: string): string {
+    return LINK_COLORS[quality] ?? LINK_COLORS.good;
+  }
+
+  function linkGlow(quality: string): string {
+    const c = LINK_COLORS[quality] ?? LINK_COLORS.good;
+    return `0 0 9px 2px ${c.replace("rgb(", "rgba(").replace(")", ",0.55)")}`;
+  }
+
+  /** Hover text: the state plus the two hops that produced it, so the colour is
+   *  explainable ("why is it orange?"). A hop with no measurement is shown as
+   *  `--` rather than 0 — 0 ms would read as "perfect link".
+   *
+   *  The total is the **sum of the rounded parts**, not its own rounding of the
+   *  unrounded sum: otherwise the tooltip can print `往返 34 ms · 浏览器 34 ms +
+   *  SSH 1 ms`, and anyone checking the arithmetic concludes the light is
+   *  broken. The grade still uses the unrounded values. */
+  function linkTitle(): string {
+    const state = $link;
+    if (state.quality === "down") return t($lang, "session.disconnected");
+    if (state.totalMs === null) return t($lang, "session.connected");
+    const serverMs = state.serverMs === null ? null : displayMs(state.serverMs);
+    // No SSH hop (local terminal): say so instead of printing "0 ms".
+    const remoteMs = state.remoteMs === null ? null : displayMs(state.remoteMs);
+    const total = (serverMs ?? 0) + (remoteMs ?? 0);
+    const parts = [t($lang, "session.latencyTotal", { ms: total })];
+    parts.push(
+      t($lang, "session.latencyParts", {
+        server: serverMs === null ? "--" : String(serverMs),
+        remote: remoteMs === null ? "--" : String(remoteMs),
+      }),
+    );
+    if (remoteMs === null && serverMs !== null) {
+      parts.push(t($lang, "session.latencyLocal"));
+    }
+    return parts.join(" · ");
+  }
+
   function tabTitle(shellId: number): string {
     const base = baseTitles[shellId] ?? t($lang, "session.tabDefault");
     const same = shells
@@ -279,6 +396,10 @@
       sessionKey = uuid();
       sessionStorage.setItem(SESSION_STORAGE_KEY, sessionKey);
     }
+    // A background tab throttles timers to ~1/min, so its samples measure the
+    // browser's scheduling, not the link — the probe skips them (see
+    // `latency.ts`) until the tab is visible again.
+    document.addEventListener("visibilitychange", onVisibilityChange);
     srocket = new Srocket<WsServer, WsClient>(`/api/s/${sessionKey}`, {
       onMessage(message) {
         rt.dispatch(message);
@@ -309,6 +430,8 @@
   onDestroy(() => {
     srocket?.dispose();
     statsPolling.stop();
+    linkQuality.stop();
+    document.removeEventListener("visibilitychange", onVisibilityChange);
   });
 
   function guardLimit(): boolean {
@@ -539,6 +662,28 @@
     pendingPwdUploads.set(shellId, payload);
     rt.send({ pwdRequest: shellId });
   }
+
+  // ---- 「命令片段」 sidebar ----------------------------------------------
+  /** Type saved text into the active terminal **without** a trailing Enter.
+   *
+   *  Multi-line commands are folded onto one line first: a `\r` would submit
+   *  every earlier line immediately (the shell runs each line as it arrives),
+   *  so the panel's promise — "type it in, do not run it" — can only be kept by
+   *  turning the line breaks into spaces. `\r` itself is deliberately *not*
+   *  sent, so the user reviews the command and presses Enter themselves. */
+  function typeIntoTerminal(text: string) {
+    if (activeId < 0) return;
+    const single = text.replace(/\r\n?/g, "\n").replace(/\n+/g, " ");
+    if (!single.trim()) return;
+    rt.send({ data: [activeId, new TextEncoder().encode(single)] });
+    // The click landed in the sidebar, so xterm lost focus: put the caret back
+    // into the terminal, otherwise Enter (and any further typing) goes nowhere.
+    termRefs[activeId]?.focus();
+  }
+
+  function toggleSnippetPanel() {
+    openPanel = openPanel === "snippets" ? null : "snippets";
+  }
 </script>
 
 <main class="flex h-screen flex-col overflow-hidden" style:background={themeBg}>
@@ -565,6 +710,15 @@
       title={t($lang, "session.titleFiles")}
     >
       <FolderIcon size="18" />
+    </button>
+    <button
+      class="rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
+      class:bg-zinc-800={snippetsOpen}
+      class:text-zinc-200={snippetsOpen}
+      onclick={toggleSnippetPanel}
+      title={t($lang, "session.titleSnippets")}
+    >
+      <ScrollTextIcon size="18" />
     </button>
     <button
       class="rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
@@ -615,16 +769,17 @@
 
     <div class="ml-auto flex shrink-0 items-center gap-2 pr-1">
       <ServerStats stats={$statsByShellStore[activeId] ?? null} />
+      <!-- Connection light: green → yellow → orange → red by the round trip a
+           keystroke actually travels (browser↔server + server↔SSH target), and
+           red when the socket is down. See `session/latency.ts` for the
+           thresholds and why the two hops are added. -->
       <div
         class="h-3.5 w-3.5 shrink-0 rounded-full ring-2 ring-black/40 transition-colors"
-        class:bg-emerald-500={linkOk}
-        class:bg-red-500={!linkOk}
-        style:box-shadow={linkOk
-          ? "0 0 9px 2px rgba(16,185,129,0.55)"
-          : "0 0 9px 2px rgba(239,68,68,0.55)"}
-        title={linkOk
-          ? t($lang, "session.connected")
-          : t($lang, "session.disconnected")}
+        style:background-color={linkColor($link.quality)}
+        style:box-shadow={linkGlow($link.quality)}
+        title={linkTitle()}
+        aria-label={linkTitle()}
+        data-quality={$link.quality}
       ></div>
     </div>
   </header>
@@ -647,6 +802,16 @@
         on:openLocalSftp={openLocalSftp}
       />
     {/if}
+    <!-- Always mounted: the saved snippets come from the store, and the history
+         mode keeps its per-shell cache across open/close. -->
+    <SnippetPanel
+      bind:this={snippetPanel}
+      {srocket}
+      shellId={activeId >= 0 ? activeId : null}
+      {connected}
+      open={snippetsOpen}
+      onTypeIn={typeIntoTerminal}
+    />
     <!-- Always mounted so in-progress transfers keep working while hidden. -->
     <FileManager
       bind:this={fileManager}
@@ -691,6 +856,7 @@
             style:visibility={shellId === activeId ? "visible" : "hidden"}
           >
             <XTerm
+              bind:this={termRefs[shellId]}
               rows={winsize.rows}
               cols={winsize.cols}
               active={shellId === activeId}
@@ -700,6 +866,8 @@
                 handleResize(shellId, detail.rows, detail.cols)}
               on:dropfiles={({ detail }) =>
                 handleTerminalDrop(shellId, detail.payload)}
+              on:submit={({ detail: command }) =>
+                recordSessionCommand(shellId, command)}
             />
           </div>
         {/each}
