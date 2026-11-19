@@ -49,7 +49,7 @@
   import { browser } from "$app/environment";
 
   import { createEventDispatcher, onDestroy, onMount } from "svelte";
-  import type { IDecoration, IMarker, Terminal } from "sshx-xterm";
+  import type { IBuffer, IDecoration, IMarker, Terminal } from "sshx-xterm";
   import type { FitAddon } from "@xterm/addon-fit";
   import { Buffer } from "buffer";
 
@@ -299,6 +299,154 @@
     }
   }
 
+  /** Column just past the last non-blank **cell** of `row` in `buf`, or 0 for a
+   *  blank row. Counted in cells (a CJK glyph is 2 wide), never in string
+   *  indices — see 坑 108: the stamp has to sit after the whole command, and the
+   *  cell count is what the renderer and the shell's own cursor agree on. */
+  function lineEndColumn(buf: IBuffer, row: number): number {
+    const line = buf.getLine(row);
+    if (!line) return 0;
+    let end = 0;
+    for (let x = 0; x < line.length; x++) {
+      const cell = line.getCell(x);
+      if (!cell) break;
+      const width = cell.getWidth();
+      // 0 = the second half of a wide glyph: part of the cell before it.
+      if (width === 0) continue;
+      if (cell.getChars().trim() !== "") end = x + width;
+    }
+    return end;
+  }
+
+  /** Absolute row of `buf`'s cursor (scrollback included). */
+  function cursorRow(buf: IBuffer): number {
+    return buf.baseY + buf.cursorY;
+  }
+
+  /** Render the stamp for the command whose **first** row is pinned by `anchor`
+   *  in `buf` — the buffer that was active on the keydown. The marker was
+   *  registered back then, so scrollback trimming while the echo is in flight
+   *  moves it along with the line instead of leaving us measuring a neighbour.
+   *  A wrapped command spans several rows and the stamp belongs on the last one,
+   *  after that row's last non-blank cell. An impossible stamp (no room even for
+   *  `HH:mm:ss`) is simply not drawn. */
+  function renderStamp(buf: IBuffer, anchor: IMarker, at: Date) {
+    if (!term) return;
+    if (anchor.line < 0) return; // trimmed away while the echo was in flight
+    // Walk down past the continuation rows of a wrapped command: the line the
+    // shell executes ends on the last of them, and a long command wraps on a
+    // narrow pane far more often than one might think.
+    let last = anchor.line;
+    while (buf.getLine(last + 1)?.isWrapped) last++;
+    const endColumn = lineEndColumn(buf, last);
+    const text = commandTimeFor(at, endColumn, term.cols);
+    if (!text) {
+      anchor.dispose();
+      return;
+    }
+    let marker = anchor;
+    if (last !== anchor.line) {
+      // A marker's line is fixed at registration, so the wrapped case needs a
+      // second one on the command's last row — and markers can only be
+      // registered in the *active* buffer. If the screen moved on to the other
+      // buffer in the meantime (a command that itself switches to the alternate
+      // screen), the stamp would land on a foreign screen, so dropping it is
+      // the honest outcome.
+      if (term.buffer.active !== buf) {
+        anchor.dispose();
+        return;
+      }
+      const lastRow = term.registerMarker(last - cursorRow(buf));
+      anchor.dispose();
+      if (!lastRow) return;
+      marker = lastRow;
+    }
+    const decoration = term.registerDecoration({
+      marker,
+      x: endColumn + COMMAND_TIME_GAP,
+      width: text.length,
+      height: 1,
+      layer: "top",
+    });
+    if (!decoration) {
+      marker.dispose();
+      return;
+    }
+    const entry = { marker, decoration };
+    decoration.onRender((el) => {
+      el.textContent = text;
+      el.classList.add("cmd-time");
+      el.setAttribute("aria-hidden", "true");
+      applyStampFont(el);
+    });
+    decoration.onDispose(() => {
+      const at = stamps.indexOf(entry);
+      if (at >= 0) stamps.splice(at, 1);
+      marker.dispose();
+    });
+    stamps.push(entry);
+  }
+
+  /** Create the stamp for the command that was just submitted.
+   *
+   *  Deliberately **deferred until the shell has echoed the newline** (坑 108):
+   *  at the keydown the echo of the last typed character may still be in
+   *  flight (the keystroke and its echo travel different paths: browser →
+   *  server → PTY → back), so the buffered line is a character or two short. A
+   *  stamp placed from that stale position *lands on top of the command* as
+   *  soon as the echo arrives — the digits then overlap the last characters,
+   *  which is exactly what the user saw after recalling a long command with ↑
+   *  and editing it.
+   *
+   *  The signal is the **cursor leaving the command's row**: the shell's echo of
+   *  the Enter is a CR+LF, so once the cursor row moved past the command the
+   *  line can no longer change. `onWriteParsed` fires at most once per frame
+   *  after a batch has been parsed, which is exactly the granularity needed;
+   *  the timeout is the fallback for anything that never echoes (a program that
+   *  swallows the Enter, a shell redrawing the line elsewhere) — a stamp is
+   *  never lost, only placed on whatever is there.
+   *
+   *  The buffer is captured here, not looked up when the stamp is drawn: a
+   *  command may itself switch to the alternate screen (`vim`, `less`, an agent
+   *  TUI), and the line to measure lives in the buffer the user typed on.
+   *
+   *  `at` is the moment the user pressed Enter: the digits say when the command
+   *  ran, not when its echo happened to arrive. */
+  function stampCommand(at: Date) {
+    if (!term) return;
+    const buf = term.buffer.active;
+    // Registered now, while the cursor is still on the command line: the marker
+    // follows that row through scrollback trimming, so measuring it later can
+    // never drift onto a neighbour.
+    const anchor = term.registerMarker(0);
+    if (!anchor) return;
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let subscription: { dispose(): void } | null = null;
+    const finalize = (force: boolean) => {
+      if (settled) return;
+      // Still on the command line of the same buffer: the echo has not landed.
+      if (
+        !force &&
+        term?.buffer.active === buf &&
+        anchor.line >= 0 &&
+        cursorRow(buf) <= anchor.line
+      ) {
+        return;
+      }
+      settled = true;
+      subscription?.dispose();
+      if (timer !== null) clearTimeout(timer);
+      if (!$settings.commandTime || !term || buf.type !== "normal") {
+        anchor.dispose();
+        return;
+      }
+      renderStamp(buf, anchor, at);
+    };
+    subscription = term.onWriteParsed(() => finalize(false));
+    timer = setTimeout(() => finalize(true), 400);
+  }
+
   /** Called from the key handler on a plain-Enter keydown, *before* xterm
    *  encodes it. Nothing here may change what is sent to the shell: no
    *  `preventDefault`, no `false` return, no write to the buffer. */
@@ -314,8 +462,9 @@
     // shell left behind, which would otherwise hide the prompt's trailing
     // space). A shell that prints a prompt without a preceding newline (after
     // `printf 'x'`) leaves two candidate prompts on one line — the first is
-    // still a prompt, so the judgement holds and only the cursor matters for
-    // placement.
+    // still a prompt, so the judgement holds. This read is only the *decision*
+    // (is this a command?); the stamp's column is measured later, once the echo
+    // has settled — see `stampCommand`.
     const row = buf.baseY + buf.cursorY;
     let first = row;
     while (first > 0 && buf.getLine(first)?.isWrapped) first--;
@@ -329,48 +478,7 @@
     if (command) dispatch("submit", command);
     if (!$settings.commandTime) return;
     if (!isCommandLine(line)) return;
-    // Everything below is in **cells**, never string indices: a command with
-    // CJK in it makes the two disagree (`cursorX` already counts 2 for one).
-    const text = commandTimeFor(new Date(), buf.cursorX, term.cols);
-    if (!text) return; // no room even for `HH:mm:ss` — a stamp may not cover the command
-    const marker = term.registerMarker(0);
-    if (!marker) return;
-    const decoration = term.registerDecoration({
-      marker,
-      // Right after the command — the placement the first version used. Both
-      // coordinates are in **cells** and are resolved by the renderer
-      // (`left: x * cellW`), so the stamp keeps its distance from the command's
-      // end when the pane is resized. `cols` never changes under a live
-      // decoration's width, so a much later resize can still push the right end
-      // of a stamp past the edge, which is only cosmetic (the digits are an
-      // overlay; buffer and selection are untouched).
-      x: buf.cursorX + COMMAND_TIME_GAP,
-      width: text.length,
-      height: 1,
-      // Above the selection highlight (z-index 7 vs 6): the stamp stays readable
-      // while text is being selected, which makes it obvious that it sits on
-      // top of the row rather than being part of it.
-      layer: "top",
-    });
-    if (!decoration) {
-      marker.dispose();
-      return;
-    }
-    const entry = { marker, decoration };
-    // The element only exists while its row is on screen, and it is re-created
-    // after a refresh, so the content and classes are set on every render.
-    decoration.onRender((el) => {
-      el.textContent = text;
-      el.classList.add("cmd-time");
-      el.setAttribute("aria-hidden", "true");
-      applyStampFont(el);
-    });
-    decoration.onDispose(() => {
-      const at = stamps.indexOf(entry);
-      if (at >= 0) stamps.splice(at, 1);
-      marker.dispose();
-    });
-    stamps.push(entry);
+    stampCommand(new Date());
   }
 
   // Turning the switch off also removes the stamps already on screen, so the
